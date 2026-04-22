@@ -1,8 +1,8 @@
 # KRICO/Post/Production
 
-Post-processing and analysis pipeline for the KRICO project (Antarctic Krill Connectivity). Based on 30-year Lagrangian particle tracking simulations (1994-2025) over CCAMLR Areas 48 and 88, forced by GLORYS12v1 ocean reanalysis.
+Post-processing and analysis pipeline for the KRICO project (Antarctic Krill Connectivity). Based on 30-year Lagrangian particle tracking simulations (1994–2025) over CCAMLR Areas 48 and 88, forced by GLORYS12v1 ocean reanalysis.
 
-**Author:** Olivier Gourgue (RBINS, Belgium)
+**Author:** Olivier Gourgue (RBINS)
 
 ---
 
@@ -35,7 +35,7 @@ Point the scripts to your local copy of the KRICO data:
 export KRICO_ROOT="/path/to/KRICO"
 ```
 
-Add this line to your shell configuration file (e.g. `~/.bashrc` or `~/.zshrc`) to make it persistent across sessions.
+Add this line to your shell configuration file (e.g. `~/.bash_profile`, `~/.bashrc`, or `~/.zshrc`) to make it persistent across sessions.
 
 ---
 
