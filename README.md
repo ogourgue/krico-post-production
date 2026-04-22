@@ -1,8 +1,8 @@
 # KRICO/Post/Production
 
-Post-processing and analysis pipeline for the KRICO project (Antarctic Krill Connectivity). Based on 30-year Lagrangian particle tracking simulations (1994–2025) over CCAMLR Areas 48 and 88, forced by GLORYS12v1 ocean reanalysis.
+Post-processing and analysis pipeline for the KRICO project (Antarctic Krill Connectivity). Based on 30-year Lagrangian particle tracking simulations (1994-2025) over CCAMLR Areas 48 and 88, forced by GLORYS12v1 ocean reanalysis.
 
-**Author:** Olivier Gourgue (RBINS)
+**Author:** Olivier Gourgue (RBINS, Belgium)
 
 ---
 
