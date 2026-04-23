@@ -149,9 +149,17 @@ def check_censoring(sic, n_obs, advance_day):
 
     # Censoring heuristic: SIC rising in the last 30 days.
     # Compare mean of last 10 days to mean of 20-30 days before end.
+    # Some particles may have all-NaN tails (deleted trajectories) which
+    # triggers "Mean of empty slice" RuntimeWarnings from np.nanmean.
+    # These particles are excluded from censoring anyway (valid mask below),
+    # so the warnings are cosmetic — suppress them.
+    import warnings
+
     if n_obs >= 30:
-        recent = np.nanmean(sic[:, -10:], axis=1)
-        earlier = np.nanmean(sic[:, -30:-10], axis=1)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            recent = np.nanmean(sic[:, -10:], axis=1)
+            earlier = np.nanmean(sic[:, -30:-10], axis=1)
     else:
         # Trajectory too short to assess trend; fall back to a simple
         # "non-zero at end" flag.
