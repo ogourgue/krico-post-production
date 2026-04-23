@@ -59,6 +59,7 @@ Outcome flag codes:
 | 4 | killed_M5_no_FIV |
 | 5 | killed_M5_not_on_shelf |
 | 6 | killed_M6_no_advance |
+| 7 | exited_domain |
 
 ## Dependencies
 
@@ -66,9 +67,13 @@ Python ≥ 3.11, `numpy`, `xarray`, `pandas`, `netCDF4`.
 
 ## Validation
 
-First qualitative validation target: 2016 and 2017 cohorts (PoC years). Compare aggregated success rates by release date against the PoC filtered recruitment curves; results are expected to differ because:
+First quantitative validation: 5 cohorts processed across the 1993-94 spawning year (Nov 15 → Mar 14). Results:
+- Success-rate bell shape centered on Jan 15: 2.2% → 6.9% → **8.3%** → 7.8% → 4.1%, matching Thorpe (2019).
+- All filter-specific behaviors (M1 declining with ice retreat, M4 peaking in Feb, M5_no_FIV monotonically rising into Mar) match Thorpe's qualitative predictions.
+- Genuine `killed_M6_no_advance` is essentially zero (~0.01%) — virtually all particles that survive M1, M4, and stay in the domain encounter sea-ice advance.
+
+Quantitative equivalence with the PoC is not expected because:
 - M4 is now T-dependent (PoC used fixed 33-day window).
 - M5 is applied as a developmental threshold (PoC did not).
 - Winter onset is per-particle sea-ice advance (PoC had no equivalent in its unfiltered matrix, and used fixed 15 May equivalent in filtered curves).
-
-Quantitative equivalence with the PoC is not expected; biological plausibility is the target.
+- `exited_domain` is now a separate outcome (PoC implicitly mixed it with other categories).
