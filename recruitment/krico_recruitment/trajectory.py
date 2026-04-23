@@ -89,3 +89,36 @@ def extract_at_day(array, day_indices):
         values = values.astype(np.float32)
     values = np.where(valid, values, np.nan)
     return values
+
+
+def last_valid_day(lon, lat, depth):
+    """
+    For each particle, find the last day index at which all of lon, lat,
+    depth are non-NaN.
+
+    Parcels deletes particles that exit the model domain (DeleteParticle
+    kernel), and field interpolation can also produce NaN at problematic
+    positions even before deletion. From the post-processing perspective,
+    "the particle is alive on day t" means it has valid position data on
+    day t.
+
+    Parameters
+    ----------
+    lon, lat, depth : ndarray of shape (n_particles, n_obs)
+
+    Returns
+    -------
+    last_day : ndarray of shape (n_particles,), dtype int64
+        Last day index with all three fields valid. -1 if the particle
+        has no valid position on any day (should not happen for any
+        well-formed simulation).
+    """
+    valid = ~(np.isnan(lon) | np.isnan(lat) | np.isnan(depth))
+    n_particles, n_obs = valid.shape
+
+    # Find the index of the last True in each row.
+    # Trick: argmax on the reversed array gives the index from the end.
+    has_any = valid.any(axis=1)
+    last_from_end = np.argmax(valid[:, ::-1], axis=1)
+    last_day = np.where(has_any, n_obs - 1 - last_from_end, -1)
+    return last_day.astype(np.int64)

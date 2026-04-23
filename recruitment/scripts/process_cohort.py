@@ -57,6 +57,13 @@ def process_cohort(input_path, output_path):
     print(f"  release date: {release_date.date()}")
 
     # ------------------------------------------------------------------
+    # Identify last valid day per particle (handles Parcels deletion and
+    # any sporadic NaN positions from field interpolation issues).
+    # ------------------------------------------------------------------
+    print("Computing last valid day per particle...")
+    last_valid = trajectory.last_valid_day(lon, lat, depth)
+
+    # ------------------------------------------------------------------
     # Step 2: T-dependent development
     # ------------------------------------------------------------------
     print("Integrating T-dependent development...")
@@ -102,8 +109,18 @@ def process_cohort(input_path, output_path):
     # Candidates: alive after M1 and M4.
     alive = ~killed_M1 & ~killed_M4
 
-    # Particles with no advance detected AND not censored → killed_M6_no_advance.
-    no_advance = alive & (advance_day == -1) & ~censored
+    # An advance event that occurs after the particle was deleted from the
+    # simulation does not count — the particle never actually experienced it.
+    # Re-classify such cases by marking the advance as not-detected.
+    deleted_before_advance = (advance_day != -1) & (advance_day > last_valid)
+    advance_day = np.where(deleted_before_advance, -1, advance_day)
+
+    # Particles with no advance detected and not censored.
+    # We further split this into:
+    #   - exited_domain: particle was deleted before day 200
+    #   - killed_M6_no_advance: particle was alive at day 200 but ice never came
+    no_advance_alive = alive & (advance_day == -1) & ~censored & (last_valid == n_obs - 1)
+    exited = alive & (advance_day == -1) & ~censored & (last_valid != n_obs - 1)
 
     # For particles with an advance event, check M5 conditions at that day.
     has_advance = alive & (advance_day != -1)
@@ -123,6 +140,11 @@ def process_cohort(input_path, output_path):
         has_advance & reached_FIV_at_advance & ~on_shelf_at_advance
     )
     success = has_advance & reached_FIV_at_advance & on_shelf_at_advance
+
+    # Censored is also restricted to particles still alive at end of tracking.
+    # (check_censoring already enforces this through the valid mask, but
+    # double-check for safety.)
+    censored = censored & (last_valid == n_obs - 1)
 
     # ------------------------------------------------------------------
     # Step 7: assemble outcome, final position, travel time, path length
@@ -144,8 +166,11 @@ def process_cohort(input_path, output_path):
     fate_day[advance_mask] = advance_day[advance_mask]
 
     # censored and killed_M6_no_advance: last day of tracking.
-    end_mask = censored | no_advance
+    end_mask = censored | no_advance_alive
     fate_day[end_mask] = n_obs - 1
+
+    # exited_domain: last valid day (when particle was deleted).
+    fate_day[exited] = last_valid[exited]
 
     # Outcome code.
     outcome_code = np.full(n_particles, -1, dtype=np.int8)
@@ -155,7 +180,8 @@ def process_cohort(input_path, output_path):
     outcome_code[killed_M4] = OUTCOME_CODES["killed_M4"]
     outcome_code[killed_M5_no_FIV] = OUTCOME_CODES["killed_M5_no_FIV"]
     outcome_code[killed_M5_not_on_shelf] = OUTCOME_CODES["killed_M5_not_on_shelf"]
-    outcome_code[no_advance] = OUTCOME_CODES["killed_M6_no_advance"]
+    outcome_code[no_advance_alive] = OUTCOME_CODES["killed_M6_no_advance"]
+    outcome_code[exited] = OUTCOME_CODES["exited_domain"]
 
     # Sanity check: every particle should have a single outcome.
     assigned = (outcome_code >= 0)

@@ -6,7 +6,7 @@ Stored as a CF-compliant integer flag in NetCDF output.
 """
 
 # CF-compliant flag_values and flag_meanings for NetCDF encoding.
-# The order defines the integer codes (0..6).
+# The order defines the integer codes (0..7).
 OUTCOME_MEANINGS = (
     "success",
     "censored",
@@ -15,6 +15,7 @@ OUTCOME_MEANINGS = (
     "killed_M5_no_FIV",
     "killed_M5_not_on_shelf",
     "killed_M6_no_advance",
+    "exited_domain",
 )
 
 # Mapping from string label to integer code (for readable code).
