@@ -1,5 +1,10 @@
-# KRICO data outputs
+# KRICO data, log outputs
 **/data/
+**/logs/
+
+# macOS stuffs
+.DS_Store
+**/.DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
