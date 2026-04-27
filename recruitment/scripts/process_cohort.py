@@ -63,6 +63,11 @@ def process_cohort(input_path, output_path):
     print("Computing last valid day per particle...")
     last_valid = trajectory.last_valid_day(lon, lat, depth)
 
+    # "Alive at end of tracking" — tolerant to a single NaN day at the
+    # very end caused by Parcels time-interpolation precision artifacts.
+    # See sea_ice.END_OF_TRACKING_TOLERANCE.
+    alive_at_end = last_valid >= n_obs - 1 - sea_ice.END_OF_TRACKING_TOLERANCE
+
     # ------------------------------------------------------------------
     # Step 2: T-dependent development
     # ------------------------------------------------------------------
@@ -97,7 +102,7 @@ def process_cohort(input_path, output_path):
     advance_day = sea_ice.detect_sea_ice_advance(sic, april1_day)
 
     # Censoring: no advance but SIC rising at end of tracking.
-    censored = sea_ice.check_censoring(sic, n_obs, advance_day)
+    censored = sea_ice.check_censoring(sic, n_obs, advance_day, last_valid)
     # Censoring does not apply to particles already killed by M1 or M4.
     censored = censored & ~killed_M1 & ~killed_M4
 
@@ -117,10 +122,10 @@ def process_cohort(input_path, output_path):
 
     # Particles with no advance detected and not censored.
     # We further split this into:
-    #   - exited_domain: particle was deleted before day 200
-    #   - killed_M6_no_advance: particle was alive at day 200 but ice never came
-    no_advance_alive = alive & (advance_day == -1) & ~censored & (last_valid == n_obs - 1)
-    exited = alive & (advance_day == -1) & ~censored & (last_valid != n_obs - 1)
+    #   - exited_domain: particle was deleted before reaching end of tracking
+    #   - killed_M6_no_advance: particle reached end of tracking but ice never came
+    no_advance_alive = alive & (advance_day == -1) & ~censored & alive_at_end
+    exited = alive & (advance_day == -1) & ~censored & ~alive_at_end
 
     # For particles with an advance event, check M5 conditions at that day.
     has_advance = alive & (advance_day != -1)
@@ -142,9 +147,9 @@ def process_cohort(input_path, output_path):
     success = has_advance & reached_FIV_at_advance & on_shelf_at_advance
 
     # Censored is also restricted to particles still alive at end of tracking.
-    # (check_censoring already enforces this through the valid mask, but
+    # (check_censoring already enforces this through alive_at_end, but
     # double-check for safety.)
-    censored = censored & (last_valid == n_obs - 1)
+    censored = censored & alive_at_end
 
     # ------------------------------------------------------------------
     # Step 7: assemble outcome, final position, travel time, path length
@@ -165,9 +170,12 @@ def process_cohort(input_path, output_path):
     advance_mask = success | killed_M5_no_FIV | killed_M5_not_on_shelf
     fate_day[advance_mask] = advance_day[advance_mask]
 
-    # censored and killed_M6_no_advance: last day of tracking.
+    # censored and killed_M6_no_advance: last valid day. For "clean"
+    # particles this is n_obs - 1; for particles with a single Parcels
+    # precision-NaN at the very last day this is n_obs - 2, and we record
+    # position from that day rather than the NaN-bearing final day.
     end_mask = censored | no_advance_alive
-    fate_day[end_mask] = n_obs - 1
+    fate_day[end_mask] = last_valid[end_mask]
 
     # exited_domain: last valid day (when particle was deleted).
     fate_day[exited] = last_valid[exited]

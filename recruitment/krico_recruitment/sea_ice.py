@@ -20,6 +20,13 @@ import pandas as pd
 ADVANCE_SIC_THRESHOLD = 0.15       # fraction, 0-1; strictly greater than this
 ADVANCE_MIN_CONSECUTIVE_DAYS = 5   # SIC above threshold for this many days
 
+# Tolerance for "alive at end of tracking". Parcels can produce a NaN
+# position on the very last output step due to time-interpolation precision
+# at the simulation end, even for particles that survived. We therefore
+# treat last_valid in [n_obs - 1 - END_OF_TRACKING_TOLERANCE, n_obs - 1]
+# as "alive at end".
+END_OF_TRACKING_TOLERANCE = 1
+
 
 def find_april1_day_index(release_date, n_obs):
     """
@@ -112,14 +119,16 @@ def detect_sea_ice_advance(sic, april1_day):
     return advance_day.astype(np.int64)
 
 
-def check_censoring(sic, n_obs, advance_day):
+def check_censoring(sic, n_obs, advance_day, last_valid):
     """
     For particles with no detected sea-ice advance, identify which are
     "censored" (SIC rising at end of tracking, advance may be pending)
     versus "no advance" (SIC flat/low, advance not expected).
 
-    A particle is considered censored if on the last day of tracking, the
-    SIC is non-negligible AND trending upward over the last 30 days.
+    A particle is considered censored if it is alive at end of tracking
+    (last_valid within END_OF_TRACKING_TOLERANCE of the final day) AND its
+    SIC at the last valid day is non-negligible AND trending upward over
+    the last 30 days.
 
     Parameters
     ----------
@@ -130,6 +139,10 @@ def check_censoring(sic, n_obs, advance_day):
     advance_day : ndarray of shape (n_particles,)
         Output of detect_sea_ice_advance. Censoring is only evaluated for
         particles with advance_day == -1.
+    last_valid : ndarray of shape (n_particles,)
+        Output of trajectory.last_valid_day. Used to identify particles
+        that are still alive (or essentially alive, modulo a 1-day Parcels
+        precision artifact) at the end of tracking.
 
     Returns
     -------
@@ -141,18 +154,20 @@ def check_censoring(sic, n_obs, advance_day):
     # Only candidates: those without a detected advance event.
     candidates = advance_day == -1
 
-    # SIC at last valid observation (use last obs index).
-    # NaN (deleted particle) should not be censored — mark as non-candidate.
-    sic_last = sic[:, -1]
-    with np.errstate(invalid="ignore"):
-        valid = ~np.isnan(sic_last)
+    # "Alive at end of tracking" — tolerant to a single NaN day at the very
+    # end caused by Parcels time-interpolation precision.
+    alive_at_end = last_valid >= n_obs - 1 - END_OF_TRACKING_TOLERANCE
+
+    # SIC at the last valid day for each particle.
+    safe_idx = np.where(last_valid >= 0, last_valid, 0)
+    sic_last = sic[np.arange(n_particles), safe_idx]
 
     # Censoring heuristic: SIC rising in the last 30 days.
     # Compare mean of last 10 days to mean of 20-30 days before end.
-    # Some particles may have all-NaN tails (deleted trajectories) which
-    # triggers "Mean of empty slice" RuntimeWarnings from np.nanmean.
-    # These particles are excluded from censoring anyway (valid mask below),
-    # so the warnings are cosmetic — suppress them.
+    # nanmean tolerates the precision NaN at the very last day; particles
+    # that exited the domain mid-trajectory have all-NaN tails and yield
+    # NaN means, which fail the rising comparison below (NaN comparisons
+    # are False).
     import warnings
 
     if n_obs >= 30:
@@ -169,5 +184,5 @@ def check_censoring(sic, n_obs, advance_day):
     # Require recent SIC to be non-negligible AND higher than earlier.
     rising = (recent > 0.05) & (recent > earlier)
 
-    censored = candidates & valid & rising
+    censored = candidates & alive_at_end & rising
     return censored
