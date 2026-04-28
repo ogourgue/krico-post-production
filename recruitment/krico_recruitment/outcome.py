@@ -1,7 +1,7 @@
 """
 Outcome categories and integer flag encoding.
 
-Each particle ends in exactly one of seven mutually exclusive states.
+Each particle ends in exactly one of eight mutually exclusive states.
 Stored as a CF-compliant integer flag in NetCDF output.
 """
 
