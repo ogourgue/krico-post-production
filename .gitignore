@@ -1,6 +1,7 @@
 # KRICO data, log outputs
 **/data/
 **/logs/
+**/archives/
 
 # macOS stuffs
 .DS_Store
