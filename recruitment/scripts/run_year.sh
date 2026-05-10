@@ -50,8 +50,10 @@ fi
 # ----------------------------------------------------------------------------
 # Configuration
 # ----------------------------------------------------------------------------
-# Fixed directory structure: this script is in recruitment/scripts/
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Fixed directory structure: script is in recruitment/scripts/
+# Use SLURM_SUBMIT_DIR when running under SLURM (BASH_SOURCE does not resolve
+# correctly when sbatch copies the script to the SLURM spool directory)
+SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 RECRUITMENT_DIR="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="${RECRUITMENT_DIR}/data"
 SCRIPT="${SCRIPT_DIR}/process_cohort.py"
