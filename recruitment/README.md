@@ -1,48 +1,96 @@
-# recruitment
+# Recruitment
 
 Per-particle recruitment post-processing for the KRICO Lagrangian trajectory dataset.
 
-Reads one Parcels trajectory NetCDF per release-day cohort and produces a per-particle recruitment outcome NetCDF following the schema defined in the Paper 1 methodology document.
+Reads one Parcels trajectory NetCDF per release-day cohort and produces a per-particle recruitment outcome NetCDF following the Thorpe et al. (2019) framework, classifying each particle into one of eight mutually exclusive outcome states.
 
 ## Layout
 
 ```
 recruitment/
 ├── README.md
-├── krico_recruitment/          # python package
+├── krico_recruitment/             # Python package
 │   ├── __init__.py
-│   ├── outcome.py              # 8-state outcome codes (CF flag)
-│   ├── development.py          # T-dependent development (Thorpe Eq. 2, Table 1)
-│   ├── filters.py              # M1 and M4 evaluation
-│   ├── sea_ice.py              # sea-ice advance detection, censoring
-│   ├── trajectory.py           # path length, pick-at-day utilities
-│   └── io.py                   # NetCDF read / write
+│   ├── outcome.py                 # 8-state outcome codes (CF flag)
+│   ├── development.py             # T-dependent development (Thorpe Eq. 2, Table 1)
+│   ├── filters.py                 # M1 and M4 evaluation
+│   ├── sea_ice.py                 # Sea-ice advance detection, censoring
+│   ├── trajectory.py              # Path length, pick-at-day utilities
+│   └── io.py                      # NetCDF read / write
 ├── scripts/
-│   ├── process_cohort.py       # single-cohort orchestration script
-│   └── run_year.sh             # SLURM array driver (1 task per spawning year)
-└── data/                       # recruitment outputs (one .nc per cohort)
+│   ├── process_cohort.py          # Single-cohort orchestration script
+│   ├── run_year.sh                # SLURM array driver (1 task per spawning year)
+│   ├── archive_by_year.sh         # Group cohort files into spawning-year tar.gz archives
+│   ├── extract_archives.sh        # Extract spawning-year archives back into individual files
+│   └── download_from_zenodo.py    # Download archives from Zenodo
+├── tests/
+├── data/                          # Recruitment outputs (gitignored)
+└── archives/                      # Spawning-year tar.gz archives (gitignored)
 ```
 
-## Single-cohort usage
+## Two workflow paths
 
-```bash
-python scripts/process_cohort.py <input_trajectory.nc> <output_recruitment.nc>
-```
+There are two ways to obtain the recruitment data:
 
-Example:
+### Path A — Full pipeline from raw trajectories
+
+For users with access to the raw KRICO simulation outputs. Reproduces the recruitment classification from scratch.
+
+**Prerequisites:**
+- HPC environment (SLURM cluster with Python 3.11+)
+- `KRICO_RUNS` environment variable set to the directory containing raw trajectory simulations (see main [README](../README.md))
+
+**Workflow:**
+1. Submit the SLURM array job (one task per spawning year, 32 tasks total):
+   ```bash
+   cd recruitment/scripts
+   sbatch run_year.sh
+   ```
+   Or for a subset:
+   ```bash
+   sbatch --array=1 run_year.sh         # First spawning year only (1994)
+   sbatch --array=1-5 run_year.sh       # First five spawning years (1994-1998)
+   ```
+2. Outputs go to `recruitment/data/` (one NetCDF per cohort, ~3,848 files for the full hindcast).
+
+For testing on a single cohort:
 ```bash
 python scripts/process_cohort.py \
-    /scratch/cvan/KRICO/Runs/KRICO_0001/1993_11_15.nc \
+    $KRICO_RUNS/KRICO_0001/1993_11_15.nc \
     data/1993_11_15.nc
 ```
 
-## SLURM array (full 30-year run)
+### Path B — Pre-processed data from Zenodo
+
+For users who want to analyze the recruitment outcomes without re-running the pipeline.
+
+**Prerequisites:**
+- Local machine (no HPC needed)
+- ~60 GB disk space
+
+**Workflow:**
+1. Download the dataset from Zenodo (DOI: [pending]) into `recruitment/archives/`:
+   ```bash
+   cd recruitment/scripts
+   python download_from_zenodo.py
+   ```
+2. Extract the archives into `recruitment/data/`:
+   ```bash
+   ./extract_archives.sh
+   ```
+
+After extraction, `recruitment/data/` contains 3,848 NetCDF files (one per release date), identical to what Path A would produce.
+
+## Archiving (project maintainer)
+
+To re-create the spawning-year tar.gz archives from `recruitment/data/` (e.g., before uploading to Zenodo):
 
 ```bash
-sbatch scripts/run_year.sh         # 32 tasks, one per spawning year
+cd recruitment/scripts
+./archive_by_year.sh
 ```
 
-Each array task processes the four release-month folders (Nov, Dec, Jan, Feb) for one spawning year. Existing output files are skipped (idempotent re-runs).
+This produces 32 archives in `recruitment/archives/` (one per spawning year, 1994–2025), each containing ~121 cohort files.
 
 ## Output schema
 
@@ -100,9 +148,3 @@ Dataset-wide outcome distribution over the full 32-year run (1994–2025, 3 848 
 | exited_domain | 0.78% |
 
 Per-cohort qualitative behaviors match Thorpe (2019): success rate peaks in mid-January; M1 declines as ice retreats through the season; M4 peaks in late summer; M5_no_FIV rises monotonically into March as the time available to reach FIV shrinks. See `F2_phenology_curve` and `F3_outcome_composition` in the [krico-paper1](https://github.com/ogourgue/krico-paper1) repo for the visual breakdown.
-
-Quantitative equivalence with the proof-of-concept document is not expected because:
-- M4 is now T-dependent (PoC used a fixed 33-day window).
-- M5 is applied as a developmental threshold (PoC did not).
-- Winter onset is per-particle sea-ice advance (PoC used a fixed 15 May equivalent in filtered curves).
-- `exited_domain` is a separate outcome (PoC implicitly mixed it with other categories).

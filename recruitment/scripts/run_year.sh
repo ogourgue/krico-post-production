@@ -38,20 +38,23 @@ set -euo pipefail
 # Environment
 # ----------------------------------------------------------------------------
 module load python3
-export KRICO_ROOT=/scratch/cvan/KRICO
+
+# Validate KRICO_RUNS environment variable
+if [[ -z "${KRICO_RUNS:-}" ]]; then
+    echo "ERROR: KRICO_RUNS environment variable not set." >&2
+    echo "Set it to the directory containing raw trajectory simulations, e.g.:" >&2
+    echo "  export KRICO_RUNS=/scratch/cvan/KRICO/Runs" >&2
+    exit 1
+fi
 
 # ----------------------------------------------------------------------------
 # Configuration
 # ----------------------------------------------------------------------------
-if [[ -z "${KRICO_ROOT:-}" ]]; then
-    echo "ERROR: KRICO_ROOT environment variable not set." >&2
-    exit 1
-fi
-
-RUNS_DIR="${KRICO_ROOT}/Runs"
-RECRUITMENT_DIR="${KRICO_ROOT}/Post/Production/recruitment"
+# Fixed directory structure: this script is in recruitment/scripts/
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RECRUITMENT_DIR="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="${RECRUITMENT_DIR}/data"
-SCRIPT="${RECRUITMENT_DIR}/scripts/process_cohort.py"
+SCRIPT="${SCRIPT_DIR}/process_cohort.py"
 
 mkdir -p "${DATA_DIR}"
 mkdir -p "${RECRUITMENT_DIR}/logs"
@@ -74,7 +77,8 @@ echo "================================================================"
 echo "Recruitment post-processing for spawning year ${SPAWNING_YEAR}"
 echo "Array task: ${YEAR_INDEX}/32"
 echo "Folders: ${FOLDERS[*]}"
-echo "Data output: ${DATA_DIR}"
+echo "Trajectory input: ${KRICO_RUNS}"
+echo "Recruitment output: ${DATA_DIR}"
 echo "Script: ${SCRIPT}"
 echo "================================================================"
 
@@ -86,7 +90,7 @@ n_skipped=0
 n_failed=0
 
 for folder in "${FOLDERS[@]}"; do
-    folder_path="${RUNS_DIR}/${folder}"
+    folder_path="${KRICO_RUNS}/${folder}"
 
     if [[ ! -d "${folder_path}" ]]; then
         echo "WARNING: folder not found, skipping: ${folder_path}" >&2

@@ -19,13 +19,6 @@
 #   cd recruitment/scripts
 #   ./archive_by_year.sh
 #
-# Output
-# ------
-#   ../archives/recruitment_1994.tar.gz
-#   ../archives/recruitment_1995.tar.gz
-#   ...
-#   ../archives/recruitment_2025.tar.gz
-#
 
 set -euo pipefail
 
@@ -61,11 +54,6 @@ for spawning_year in {1994..2025}; do
     prev_year=$((spawning_year - 1))
 
     echo -n "Spawning year $spawning_year (files from ${prev_year}_11 through ${spawning_year}_03)... "
-
-    # Build list of files for this spawning year
-    # Includes:
-    #   - ${prev_year}_11_*.nc and ${prev_year}_12_*.nc (Nov and Dec of previous year)
-    #   - ${spawning_year}_01_*.nc, ${spawning_year}_02_*.nc, ${spawning_year}_03_*.nc (Jan, Feb, Mar of spawning year)
 
     files_to_archive=()
 
@@ -108,7 +96,6 @@ for spawning_year in {1994..2025}; do
     archive_path="$OUTPUT_DIR/$archive_name"
 
     # Use relative paths in archive for cleaner extraction
-    # Change to input directory, archive files by passing basenames via stdin
     cd "$INPUT_DIR"
     {
         for file in "${files_to_archive[@]}"; do
@@ -135,9 +122,3 @@ ls -lh "$OUTPUT_DIR"/recruitment_*.tar.gz | awk '{print "  " $9 " (" $5 ")"}'
 echo
 echo "Total size:"
 du -sh "$OUTPUT_DIR" | awk '{print "  " $1}'
-echo
-
-echo "Verification: list contents of first archive"
-echo "  tar -tzf $OUTPUT_DIR/recruitment_1994.tar.gz | head -5"
-tar -tzf "$OUTPUT_DIR/recruitment_1994.tar.gz" | head -5
-echo "  ..."

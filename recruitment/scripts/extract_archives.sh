@@ -53,7 +53,6 @@ for archive in $(find "$ARCHIVES_DIR" -maxdepth 1 -name "recruitment_[0-9][0-9][
     echo -n "Spawning year $year... "
 
     # Check if files from this archive already exist in data/
-    # Use the first file in the archive as a proxy
     first_file=$(tar -tzf "$archive" | head -1)
     if [[ -f "$DATA_DIR/$first_file" ]]; then
         echo "SKIP (already extracted)"
