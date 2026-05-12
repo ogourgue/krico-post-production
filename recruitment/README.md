@@ -66,7 +66,7 @@ For users who want to analyze the recruitment outcomes without re-running the pi
 
 **Prerequisites:**
 - Local machine (no HPC needed)
-- ~60 GB disk space
+- ~100 GB peak disk space (42 GB compressed download + 56 GB extracted); archives can be deleted after extraction to reclaim 42 GB
 
 **Workflow:**
 1. Download the dataset from Zenodo (DOI: [pending]) into `recruitment/archives/`:
