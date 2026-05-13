@@ -2,13 +2,12 @@
 
 Post-processing and analysis pipeline for the KRICO project (Antarctic Krill Connectivity). Based on a 32-year Lagrangian particle tracking hindcast (1994–2025) of Antarctic krill larval dispersal across CCAMLR Areas 48 and 88, forced by GLORYS12v1 ocean reanalysis.
 
-**Author:** Olivier Gourgue (RBINS)
+Author: Olivier Gourgue (RBINS)
 
-**Related repositories:**
-- [krico-templates](https://github.com/ogourgue/krico-templates) — Simulation templates (Parcels + GLORYS12v1)
-- [krico-paper1](https://github.com/ogourgue/krico-paper1) — Paper 1 figure reproduction
+Related repositories:
 
----
+* __[krico-templates](https://github.com/ogourgue/krico-templates)__ — Simulation templates (Parcels + GLORYS12v1)
+* __[krico-paper1](https://github.com/ogourgue/krico-paper1)__ — Paper 1 figure reproduction
 
 ## Repository structure
 
@@ -26,8 +25,6 @@ krico-post-production/
 ```
 
 Each analysis subfolder is self-contained, with its own scripts, data, and documentation. Data and archives folders are gitignored and created automatically by the scripts.
-
----
 
 ## Setup
 
@@ -47,10 +44,8 @@ Add this line to your shell configuration file (e.g. `~/.bash_profile`, `~/.bash
 
 The raw trajectory data are not currently publicly archived due to storage constraints. They are available on demand for the duration of the KRICO project (until end of 2026), after which public archiving will be revisited.
 
----
-
 ## Analyses
 
-- **[recruitment/](recruitment/)** — Per-particle classification into 8 outcome states (success, censored, killed by mortality filters M1/M4/M5/M6, exited domain). Outputs available on Zenodo (DOI: [pending]).
+* __[recruitment/](recruitment/)__ — Per-particle classification into 8 outcome states (success, censored, killed by mortality filters M1/M4/M5/M6, exited domain). Outputs available on Zenodo (DOI: [10.5281/zenodo.20101159](https://doi.org/10.5281/zenodo.20101159)).
 
 Additional analysis subfolders will be added as the project progresses.
