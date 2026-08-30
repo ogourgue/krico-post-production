@@ -1,7 +1,13 @@
 # KRICO data, log outputs
+# data_*/ covers archived classifications kept alongside the current one
+# (e.g. recruitment/data_m1_at_release/, the M1-at-release classification).
 **/data/
+**/data_*/
 **/logs/
 **/archives/
+
+# SLURM submission logs (dropped in the submission directory by ecsbatch)
+ecsbatch.log.*
 
 # macOS stuffs
 .DS_Store

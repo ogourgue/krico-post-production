@@ -24,9 +24,20 @@
 # series. Outputs go to recruitment/data/ as YYYY_MM_DD.nc (release date in
 # filename uniquely identifies the cohort across folders).
 #
-# Existing output files are skipped (idempotent re-runs).
+# Existing output files are skipped (idempotent re-runs). Note that this makes
+# the script a no-op against a populated output directory: when the
+# classification itself changes, move the previous recruitment/data/ aside
+# first so that a fresh one is created.
+#
+# M1 is evaluated at spawning, which precedes release by the descent-ascent
+# interval, so the GLORYS12 sea-ice fields are required in addition to the
+# trajectories. The offset itself is a package constant
+# (krico_recruitment.sea_ice.SPAWNING_OFFSET_DAYS) and is echoed by
+# process_cohort.py for each cohort.
 #
 # Submit with:
+#   export KRICO_RUNS=/scratch/cvan/KRICO/Runs
+#   export KRICO_GLORYS12=/scratch/cvan/KRICO/Pre/GLORYS12
 #   sbatch run_year.sh
 # Or for a subset (e.g. just first year):
 #   sbatch --array=1 run_year.sh
@@ -44,6 +55,17 @@ if [[ -z "${KRICO_RUNS:-}" ]]; then
     echo "ERROR: KRICO_RUNS environment variable not set." >&2
     echo "Set it to the directory containing raw trajectory simulations, e.g.:" >&2
     echo "  export KRICO_RUNS=/scratch/cvan/KRICO/Runs" >&2
+    exit 1
+fi
+
+# Validate KRICO_GLORYS12 environment variable. M1 is evaluated at the
+# spawning date, which precedes the trajectory, so sea-ice concentration is
+# read directly from the reanalysis rather than sampled along the trajectory.
+if [[ -z "${KRICO_GLORYS12:-}" ]]; then
+    echo "ERROR: KRICO_GLORYS12 environment variable not set." >&2
+    echo "Set it to the GLORYS12 preprocessing output directory containing" >&2
+    echo "glorys12_ice_YYYY_MM.nc, e.g.:" >&2
+    echo "  export KRICO_GLORYS12=/scratch/cvan/KRICO/Pre/GLORYS12" >&2
     exit 1
 fi
 
@@ -80,6 +102,7 @@ echo "Recruitment post-processing for spawning year ${SPAWNING_YEAR}"
 echo "Array task: ${YEAR_INDEX}/32"
 echo "Folders: ${FOLDERS[*]}"
 echo "Trajectory input: ${KRICO_RUNS}"
+echo "Sea-ice input: ${KRICO_GLORYS12}"
 echo "Recruitment output: ${DATA_DIR}"
 echo "Script: ${SCRIPT}"
 echo "================================================================"
@@ -123,7 +146,8 @@ for folder in "${FOLDERS[@]}"; do
         fi
 
         echo "  [run]  ${basename}"
-        if python3 "${SCRIPT}" "${cohort_file}" "${output_file}"; then
+        if python3 "${SCRIPT}" "${cohort_file}" "${output_file}" \
+                   --glorys "${KRICO_GLORYS12}"; then
             n_processed=$((n_processed + 1))
         else
             echo "  [FAIL] ${basename}" >&2

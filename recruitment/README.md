@@ -14,7 +14,7 @@ recruitment/
 │   ├── outcome.py                 # 8-state outcome codes (CF flag)
 │   ├── development.py             # T-dependent development (Thorpe Eq. 2, Table 1)
 │   ├── filters.py                 # M1 and M4 evaluation
-│   ├── sea_ice.py                 # Sea-ice advance detection, censoring
+│   ├── sea_ice.py                 # Sea-ice at spawning, advance detection, censoring
 │   ├── trajectory.py              # Path length, pick-at-day utilities
 │   └── io.py                      # NetCDF read / write
 ├── scripts/
@@ -39,6 +39,7 @@ For users with access to the raw KRICO simulation outputs. Reproduces the recrui
 **Prerequisites:**
 - HPC environment (SLURM cluster with Python 3.11+)
 - `KRICO_RUNS` environment variable set to the directory containing raw trajectory simulations (see main [README](../README.md))
+- `KRICO_GLORYS12` environment variable set to the GLORYS12 preprocessing output directory containing the monthly sea-ice files (`glorys12_ice_YYYY_MM.nc`). Required because M1 is evaluated at the spawning date, which precedes the trajectory — see [M1 at spawning](#m1-at-spawning) below.
 
 **Workflow:**
 1. Submit the SLURM array job (one task per spawning year, 32 tasks total):
@@ -53,11 +54,14 @@ For users with access to the raw KRICO simulation outputs. Reproduces the recrui
    ```
 2. Outputs go to `recruitment/data/` (one NetCDF per cohort, ~3,848 files for the full hindcast).
 
+Cohorts whose output already exists are skipped, so re-runs are idempotent. This also means the job does nothing against a populated output directory: when the classification itself changes, move the previous `recruitment/data/` aside first.
+
 For testing on a single cohort:
 ```bash
 python scripts/process_cohort.py \
     $KRICO_RUNS/KRICO_0001/1993_11_15.nc \
-    data/1993_11_15.nc
+    data/1993_11_15.nc \
+    --glorys $KRICO_GLORYS12
 ```
 
 ### Path B — Pre-processed data from Zenodo
@@ -79,7 +83,32 @@ For users who want to analyze the recruitment outcomes without re-running the pi
    ./extract_archives.sh
    ```
 
-After extraction, `recruitment/data/` contains 3,848 NetCDF files (one per release date), identical to what Path A would produce.
+After extraction, `recruitment/data/` contains 3,848 NetCDF files (one per release date).
+
+## Dataset versions
+
+The archived dataset and the current code do not presently produce the same classification.
+
+| Version | M1 evaluated at | Status |
+|---|---|---|
+| v1.0.0 ([10.5281/zenodo.20101159](https://doi.org/10.5281/zenodo.20101159)) | Release date, from the trajectory at day 0 | Published; what Path B currently downloads |
+| v2 | Spawning date, from the GLORYS12 field | Produced by the current code; Zenodo upload pending |
+
+Path A therefore produces v2 while Path B retrieves v1. M1 is substantially larger under v2 — evaluating the constraint at release rather than at spawning underestimates early-season spawning suppression — and every outcome downstream of M1 shifts accordingly. This note will be replaced by a version table once v2 is uploaded.
+
+Output files from v2 carry the evaluation provenance as global attributes (`m1_spawning_offset_days`, `m1_spawning_date`, `m1_sic_source`); v1 files have none, which distinguishes them.
+
+## M1 at spawning
+
+M1 represents a constraint acting on the spawning adult: spawning does not occur where sea-ice concentration is at or above 80%. The 23-26 day descent-ascent cycle from spawning to calyptopis I is not simulated, so particles enter the model as calyptopis I and their release date postdates spawning. Reading sea-ice concentration from the trajectory at day 0 therefore evaluates the constraint at the wrong time, and because concentration falls through the early season it systematically underestimates spawning suppression.
+
+M1 is instead evaluated at the release position on the spawning date, sampling the GLORYS12 sea-ice field directly. The release position stands as the spawning position, consistent with the model's neglect of transport during the descent-ascent interval.
+
+The offset is a constant, `SPAWNING_OFFSET_DAYS = 24` in `krico_recruitment/sea_ice.py`, the midpoint of the 23-26 day range given by Thorpe et al. (2019). Varying it across that range changes the domain-wide M1 fraction by less than one percentage point; see `S1_m1_offset_sensitivity/` in the [krico-paper1](https://github.com/ogourgue/krico-paper1) repo.
+
+Sampling is nearest-neighbour on the reanalysis grid, whereas Parcels interpolates when sampling along trajectories. Compared against the trajectory value at day 0, the two agree to a mean absolute difference of 2.4 × 10⁻⁶, with disagreement above 0.01 confined to 0.005% of particles in coastal cells where the field has a sharp gradient, and one particle in 545 807 classified differently.
+
+M1 is the only filter affected. M4 acts from calyptopis I onward, which is the release, and M5 and M6 are triggered by calendar events during tracking.
 
 ## Archiving (project maintainer)
 
@@ -138,13 +167,15 @@ Dataset-wide outcome distribution over the full 32-year run (1994–2025, 3 848 
 
 | outcome | fraction |
 |---|---|
-| success | 5.83% |
-| censored | 1.42% |
-| killed_M1 | 23.16% |
-| killed_M4 | 8.46% |
-| killed_M5_no_FIV | 7.32% |
-| killed_M5_not_on_shelf | 14.37% |
-| killed_M6_no_advance | 38.67% |
-| exited_domain | 0.78% |
+| success | TBD |
+| censored | TBD |
+| killed_M1 | TBD |
+| killed_M4 | TBD |
+| killed_M5_no_FIV | TBD |
+| killed_M5_not_on_shelf | TBD |
+| killed_M6_no_advance | TBD |
+| exited_domain | TBD |
+
+*To be filled in once the v2 classification completes. For reference, the v1 distribution (M1 at release) was: success 5.83%, censored 1.42%, killed_M1 23.16%, killed_M4 8.46%, killed_M5_no_FIV 7.32%, killed_M5_not_on_shelf 14.37%, killed_M6_no_advance 38.67%, exited_domain 0.78%.*
 
 Per-cohort qualitative behaviors match Thorpe (2019): success rate peaks in mid-January; M1 declines as ice retreats through the season; M4 peaks in late summer; M5_no_FIV rises monotonically into March as the time available to reach FIV shrinks. See `F2_phenology_curve` and `F3_outcome_composition` in the [krico-paper1](https://github.com/ogourgue/krico-paper1) repo for the visual breakdown.
