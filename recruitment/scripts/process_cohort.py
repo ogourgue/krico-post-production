@@ -5,11 +5,16 @@ NetCDF.
 
 Usage
 -----
-    python process_cohort.py <input_trajectory.nc> <output_recruitment.nc>
+    python process_cohort.py <input_trajectory.nc> <output_recruitment.nc> \
+        --glorys <GLORYS12 ice directory> [--offset 24]
 
 The input file is one of the KRICO simulation outputs (e.g. 1993_11_15.nc).
 The output file contains one row per particle with the 9-column schema
 described in the Paper 1 methodology document.
+
+M1 is evaluated at spawning, which precedes release by --offset days. The
+sea-ice concentration at that moment is read from the GLORYS12 monthly ice
+files rather than from the trajectory, so --glorys is required.
 """
 
 import argparse
@@ -18,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from netCDF4 import Dataset
 
 # Allow running the script directly from the `scripts/` folder: add the
 # parent directory (which contains the krico_recruitment package) to sys.path.
@@ -31,7 +37,8 @@ from krico_recruitment.outcome import OUTCOME_CODES
 SHELF_DEPTH_THRESHOLD = 2000.0
 
 
-def process_cohort(input_path, output_path):
+def process_cohort(input_path, output_path, glorys_dir,
+                   offset_days=sea_ice.SPAWNING_OFFSET_DAYS):
     """
     Run the full pipeline on one cohort and write the output file.
     """
@@ -80,10 +87,18 @@ def process_cohort(input_path, output_path):
 
     # ------------------------------------------------------------------
     # Step 3: M1 (spawning SIC >= 80%)
+    #
+    # Evaluated at the spawning date, which precedes release by the
+    # descent-ascent interval. The concentration is sampled from the
+    # GLORYS12 field at the release position, not from the trajectory.
     # ------------------------------------------------------------------
-    print("Evaluating M1...")
-    sic_at_release = sic[:, 0]
-    killed_M1 = filters.evaluate_M1(sic_at_release)
+    spawning_date = release_date.normalize() - pd.Timedelta(days=offset_days)
+    print(f"Evaluating M1 at spawning ({spawning_date.date()}, "
+          f"{offset_days} days before release)...")
+    sic_at_spawning = sea_ice.spawning_sic(
+        lon[:, 0], lat[:, 0], release_date, glorys_dir, offset_days
+    )
+    killed_M1 = filters.evaluate_M1(sic_at_spawning)
 
     # ------------------------------------------------------------------
     # Step 4: M4 (calyptope starvation)
@@ -160,7 +175,9 @@ def process_cohort(input_path, output_path):
     # Default to -1, then fill in per outcome.
     fate_day = np.full(n_particles, -1, dtype=np.int64)
 
-    # killed_M1: day 0 (release).
+    # killed_M1: day 0 (release). The constraint acts at spawning, which is
+    # not simulated, so the release position and day 0 remain the recorded
+    # fate — the particle never enters the water column.
     fate_day[killed_M1] = 0
 
     # killed_M4: day threshold was crossed.
@@ -243,6 +260,15 @@ def process_cohort(input_path, output_path):
         release_date=release_date,
     )
 
+    # Record the M1 evaluation provenance on the output file, so that any
+    # dataset can report which offset produced it. Written here rather than
+    # through write_recruitment_file to keep that function's signature
+    # unchanged; move it there if more provenance attributes accumulate.
+    with Dataset(output_path, "a") as nc:
+        nc.m1_spawning_offset_days = int(offset_days)
+        nc.m1_spawning_date = str(spawning_date.date())
+        nc.m1_sic_source = str(glorys_dir)
+
     # Quick summary to stdout for validation.
     print()
     print("Outcome summary:")
@@ -259,9 +285,20 @@ def main():
     )
     parser.add_argument("input", type=str, help="Input trajectory NetCDF (e.g. 1993_11_15.nc)")
     parser.add_argument("output", type=str, help="Output recruitment NetCDF")
+    parser.add_argument(
+        "--glorys", type=str, required=True,
+        help="Directory holding glorys12_ice_YYYY_MM.nc, used to evaluate M1 "
+             "at the spawning date",
+    )
+    parser.add_argument(
+        "--offset", type=int, default=sea_ice.SPAWNING_OFFSET_DAYS,
+        help=f"Days from spawning to calyptopis I "
+             f"(default {sea_ice.SPAWNING_OFFSET_DAYS}; Thorpe et al. 2019 "
+             f"give 23-26)",
+    )
     args = parser.parse_args()
 
-    process_cohort(args.input, args.output)
+    process_cohort(args.input, args.output, args.glorys, args.offset)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,11 @@
 """
 Evaluation of mortality filters M1 and M4 from Thorpe et al. (2019).
 
-M1: Spawning cannot occur where sea ice concentration >= 80% at release.
+M1: Spawning cannot occur where sea ice concentration >= 80% at spawning.
+    Spawning precedes release by the descent-ascent interval, which is not
+    simulated, so the concentration is sampled from the reanalysis field at
+    the release position on the spawning date (see sea_ice.spawning_sic)
+    rather than read from the trajectory at day 0.
 M4: Calyptope stages (CI-CIII) starve after >10 consecutive days under
     sea ice concentration > 40%. The duration of CI-CIII is
     temperature-dependent and trajectory-specific (from development module).
@@ -16,7 +20,7 @@ begin post-ascent at 50-200 m depth.
 import numpy as np
 
 
-# M1 threshold: sea ice concentration at release (fraction, 0-1).
+# M1 threshold: sea ice concentration at spawning (fraction, 0-1).
 M1_SIC_THRESHOLD = 0.80
 
 # M4 parameters.
@@ -24,22 +28,27 @@ M4_SIC_THRESHOLD = 0.40           # fraction, 0-1
 M4_MAX_CONSECUTIVE_DAYS = 10      # strictly greater than this triggers starvation
 
 
-def evaluate_M1(sic_at_release):
+def evaluate_M1(sic_at_spawning):
     """
-    Evaluate M1 (spawning under dense sea ice) for all particles.
+    Evaluate M1 (spawning under compact sea ice) for all particles.
 
     Parameters
     ----------
-    sic_at_release : ndarray of shape (n_particles,)
+    sic_at_spawning : ndarray of shape (n_particles,)
         Sea ice concentration (fraction, 0-1) at the particle's release
-        position at release time (day 0).
+        position on the spawning date. NaN (land, or outside the field)
+        is treated as below threshold.
 
     Returns
     -------
     killed : ndarray of shape (n_particles,), dtype bool
         True where the particle is killed by M1.
     """
-    return sic_at_release >= M1_SIC_THRESHOLD
+    # NaN compares False against the threshold, which is the behaviour we
+    # want, but comparing NaN raises an invalid-value warning on some numpy
+    # versions. Make the intent explicit rather than relying on it.
+    with np.errstate(invalid="ignore"):
+        return np.nan_to_num(sic_at_spawning, nan=0.0) >= M1_SIC_THRESHOLD
 
 
 def evaluate_M4(sic, calyptope_end_day):
@@ -72,7 +81,7 @@ def evaluate_M4(sic, calyptope_end_day):
     killed = np.zeros(n_particles, dtype=bool)
     kill_day = np.full(n_particles, -1, dtype=np.int64)
 
-    # Boolean array: particle under heavy ice on this day.
+    # Boolean array: particle under compact ice on this day.
     # NaN in SIC (after deletion) treated as False here — doesn't matter
     # because those particles will be handled at outcome-determination time.
     with np.errstate(invalid="ignore"):

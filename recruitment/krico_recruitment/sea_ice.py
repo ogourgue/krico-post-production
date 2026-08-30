@@ -1,6 +1,9 @@
 """
-Sea-ice advance detection (per-particle winter onset).
+Sea-ice advance detection (per-particle winter onset), and sea-ice
+concentration at spawning.
 
+Advance
+-------
 For each particle, winter onset is defined as the first date on or after
 April 1 of the relevant austral autumn where sea ice concentration at the
 particle's location exceeds 15% for 5 consecutive days.
@@ -10,10 +13,29 @@ ice. The austral autumn is defined relative to the release date:
   - release in Jan-Mar → April 1 of same calendar year
   - release in Nov-Dec → April 1 of following calendar year
 Equivalently: the first April 1 that falls within the tracking window.
+
+Spawning
+--------
+M1 represents a constraint acting on the spawning adult, but the 23-26 day
+descent-ascent cycle from spawning to calyptopis I is not simulated, so
+particles enter the model as calyptopis I and their release date postdates
+spawning. Reading sea-ice concentration from the trajectory at day 0
+therefore samples the field at the wrong time. spawning_sic samples the
+GLORYS12 field at the release position on the spawning date instead.
+
+The release position stands as the spawning position, which is consistent
+with the model's neglect of transport during the descent-ascent interval.
+
+Sampling is nearest-neighbour on the reanalysis grid, whereas Parcels
+interpolates when sampling along trajectories. The two agree to a mean
+absolute difference of 2.4e-06, with disagreement above 0.01 confined to
+0.005% of particles in coastal cells where the field has a sharp gradient.
+See krico-paper1/S1_m1_offset_sensitivity/.
 """
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 
 
 # Sea-ice advance parameters (Thorpe 2019, Stammerjohn et al. 2008).
@@ -26,6 +48,133 @@ ADVANCE_MIN_CONSECUTIVE_DAYS = 5   # SIC above threshold for this many days
 # treat last_valid in [n_obs - 1 - END_OF_TRACKING_TOLERANCE, n_obs - 1]
 # as "alive at end".
 END_OF_TRACKING_TOLERANCE = 1
+
+# Descent-ascent duration from spawning to calyptopis I. Thorpe et al. (2019)
+# give 23-26 days; the midpoint is applied as a constant. Varying it across
+# that range changes the domain-wide M1 fraction by less than one percentage
+# point — see krico-paper1/S1_m1_offset_sensitivity/.
+SPAWNING_OFFSET_DAYS = 24
+
+GLORYS_ICE_PATTERN = "glorys12_ice_{year:04d}_{month:02d}.nc"
+
+# Monthly ice files are opened lazily and cached: consecutive cohorts almost
+# always fall in the same month.
+_ICE_CACHE = {}
+
+
+def _open_ice_month(glorys_dir, year, month):
+    """Open a monthly GLORYS12 sea-ice file, with a small cache."""
+    key = (str(glorys_dir), year, month)
+    if key not in _ICE_CACHE:
+        path = f"{glorys_dir}/" + GLORYS_ICE_PATTERN.format(year=year,
+                                                            month=month)
+        _ICE_CACHE[key] = xr.open_dataset(path)
+        # Keep the cache small; a cohort never needs more than two months.
+        if len(_ICE_CACHE) > 3:
+            for stale in list(_ICE_CACHE):
+                if stale != key:
+                    _ICE_CACHE.pop(stale).close()
+                    break
+    return _ICE_CACHE[key]
+
+
+def _grid_axes(ds):
+    """
+    Return ascending 1-D longitude and latitude axes from the 2-D NEMO
+    coordinate arrays.
+
+    The monthly files carry nav_lon and nav_lat on the ORCA grid. Over the
+    KRICO domain that grid is regular, so a row and a column are valid axes,
+    but this is checked rather than assumed.
+    """
+    lon = np.asarray(ds["nav_lon"].values)
+    lat = np.asarray(ds["nav_lat"].values)
+
+    if lon.ndim == 2:
+        if not np.allclose(lon, lon[0:1, :], equal_nan=True):
+            raise ValueError(
+                "nav_lon varies along y: the grid is not regular over this "
+                "domain and cannot be indexed as separable axes."
+            )
+        lon = lon[0, :]
+    if lat.ndim == 2:
+        if not np.allclose(lat, lat[:, 0:1], equal_nan=True):
+            raise ValueError(
+                "nav_lat varies along x: the grid is not regular over this "
+                "domain and cannot be indexed as separable axes."
+            )
+        lat = lat[:, 0]
+
+    if lon.size < 2 or lat.size < 2:
+        raise ValueError("degenerate coordinate axes in the sea-ice file")
+    if lon[1] < lon[0] or lat[1] < lat[0]:
+        raise ValueError("coordinate axes are not ascending")
+    return lon, lat
+
+
+def _sample_nearest(field, lon_axis, lat_axis, lon, lat):
+    """Nearest-neighbour sample of a regular grid at scattered points."""
+    lon_mid = 0.5 * (lon_axis[:-1] + lon_axis[1:])
+    lat_mid = 0.5 * (lat_axis[:-1] + lat_axis[1:])
+    i = np.searchsorted(lon_mid, lon)
+    j = np.searchsorted(lat_mid, lat)
+    np.clip(i, 0, lon_axis.size - 1, out=i)
+    np.clip(j, 0, lat_axis.size - 1, out=j)
+    return field[j, i]
+
+
+def spawning_sic(lon, lat, release_date, glorys_dir,
+                 offset_days=SPAWNING_OFFSET_DAYS):
+    """
+    Sea-ice concentration at the spawning position and date.
+
+    Parameters
+    ----------
+    lon, lat : ndarray of shape (n_particles,)
+        Release positions, taken as the spawning positions.
+    release_date : pandas.Timestamp or datetime-like
+        Release date of the cohort (day 0 of the trajectory).
+    glorys_dir : str or Path
+        Directory holding glorys12_ice_YYYY_MM.nc.
+    offset_days : int
+        Days from spawning to calyptopis I. The field is sampled
+        offset_days before release_date. Zero samples the release date
+        itself, which reproduces the trajectory value at day 0 and is
+        used as a regression test.
+
+    Returns
+    -------
+    ndarray of shape (n_particles,)
+        Concentration as a fraction (0-1), NaN over land and where the
+        field carries its fill value.
+    """
+    release_date = pd.Timestamp(release_date).normalize()
+    spawning_date = release_date - pd.Timedelta(days=int(offset_days))
+
+    ds = _open_ice_month(glorys_dir, spawning_date.year, spawning_date.month)
+
+    # Daily means are stamped at 12:00, so a midnight target would be
+    # equidistant from two days. Ask for midday, then verify the day that
+    # came back is the one requested.
+    target = np.datetime64(spawning_date.strftime("%Y-%m-%dT12:00:00"))
+    da = ds["ileadfra"].sel(time_counter=target, method="nearest")
+    selected = pd.Timestamp(da["time_counter"].values).normalize()
+    if selected != spawning_date:
+        raise ValueError(
+            f"requested sea ice for {spawning_date.date()}, field returned "
+            f"{selected.date()}; check monthly file coverage in {glorys_dir}"
+        )
+
+    field = np.squeeze(np.asarray(da.values, dtype="float64"))
+    if field.ndim != 2:
+        raise ValueError(
+            f"expected a 2-D sea-ice field, got shape {field.shape}"
+        )
+
+    lon_axis, lat_axis = _grid_axes(ds)
+    return _sample_nearest(field, lon_axis, lat_axis,
+                           np.asarray(lon, dtype="float64"),
+                           np.asarray(lat, dtype="float64"))
 
 
 def find_april1_day_index(release_date, n_obs):
