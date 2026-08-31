@@ -165,17 +165,25 @@ Python ≥ 3.11, `numpy`, `xarray`, `pandas`, `netCDF4`.
 
 Dataset-wide outcome distribution over the full 32-year run (1994–2025, 3 848 cohorts, ≈ 2.1 × 10⁹ particles):
 
-| outcome | fraction |
-|---|---|
-| success | TBD |
-| censored | TBD |
-| killed_M1 | TBD |
-| killed_M4 | TBD |
-| killed_M5_no_FIV | TBD |
-| killed_M5_not_on_shelf | TBD |
-| killed_M6_no_advance | TBD |
-| exited_domain | TBD |
+| outcome | count | fraction | v1 (M1 at release) |
+|---|---:|---:|---:|
+| success | 110,417,165 | 5.26% | 5.83% |
+| censored | 27,221,228 | 1.30% | 1.42% |
+| killed_M1 | 595,485,067 | 28.35% | 23.16% |
+| killed_M4 | 134,504,220 | 6.40% | 8.46% |
+| killed_M5_no_FIV | 131,306,367 | 6.25% | 7.32% |
+| killed_M5_not_on_shelf | 282,050,117 | 13.43% | 14.37% |
+| killed_M6_no_advance | 803,211,965 | 38.24% | 38.67% |
+| exited_domain | 16,069,207 | 0.77% | 0.78% |
 
-*To be filled in once the v2 classification completes. For reference, the v1 distribution (M1 at release) was: success 5.83%, censored 1.42%, killed_M1 23.16%, killed_M4 8.46%, killed_M5_no_FIV 7.32%, killed_M5_not_on_shelf 14.37%, killed_M6_no_advance 38.67%, exited_domain 0.78%.*
+Total: 2,100,265,336 particles. `killed_M6_no_advance` and `censored` together account for 39.54%.
+
+Evaluating M1 at spawning rather than at release raises it by 5.19 percentage points, drawn from the categories downstream of it roughly in proportion to their size. `exited_domain` is unchanged, as it must be: domain exit is determined by the trajectory, not by M1.
+
+Regenerate with:
+```bash
+cd recruitment/scripts
+sbatch outcome_distribution.sh          # writes to recruitment/data/
+```
 
 Per-cohort qualitative behaviors match Thorpe (2019): success rate peaks in mid-January; M1 declines as ice retreats through the season; M4 peaks in late summer; M5_no_FIV rises monotonically into March as the time available to reach FIV shrinks. See `F2_phenology_curve` and `F3_outcome_composition` in the [krico-paper1](https://github.com/ogourgue/krico-paper1) repo for the visual breakdown.
