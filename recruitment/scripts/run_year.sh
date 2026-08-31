@@ -22,7 +22,9 @@
 #
 # Within each folder, each daily release file YYYY_MM_DD.nc is processed in
 # series. Outputs go to recruitment/data/ as YYYY_MM_DD.nc (release date in
-# filename uniquely identifies the cohort across folders).
+# filename uniquely identifies the cohort across folders). Job logs go to
+# recruitment/scripts/logs/, since the SBATCH output paths above are relative
+# to the submission directory.
 #
 # Existing output files are skipped (idempotent re-runs). Note that this makes
 # the script a no-op against a populated output directory: when the
@@ -35,7 +37,7 @@
 # (krico_recruitment.sea_ice.SPAWNING_OFFSET_DAYS) and is echoed by
 # process_cohort.py for each cohort.
 #
-# Submit with:
+# Submit from recruitment/scripts:
 #   export KRICO_RUNS=/scratch/cvan/KRICO/Runs
 #   export KRICO_GLORYS12=/scratch/cvan/KRICO/Pre/GLORYS12
 #   sbatch run_year.sh
@@ -81,7 +83,10 @@ DATA_DIR="${RECRUITMENT_DIR}/data"
 SCRIPT="${SCRIPT_DIR}/process_cohort.py"
 
 mkdir -p "${DATA_DIR}"
-mkdir -p "${RECRUITMENT_DIR}/logs"
+
+# SLURM resolves the SBATCH output paths relative to the submission directory,
+# so the log directory must be created there rather than in RECRUITMENT_DIR.
+mkdir -p "${SCRIPT_DIR}/logs"
 
 # ----------------------------------------------------------------------------
 # Resolve spawning year and the four simulation folders that feed it
