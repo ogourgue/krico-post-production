@@ -17,8 +17,10 @@ Behavior:
     attempts per archive before failing.
   - Selective. The --years argument restricts the download to a subset.
 
-The default DOI points to v1.0.0 of the dataset (10.5281/zenodo.20101159).
-Override with --doi for a different version.
+The default DOI points to v2.0.0 of the dataset (10.5281/zenodo.22548763),
+the M1-at-spawning classification produced by this version of the code.
+Override with --doi for a different version; v1.0.0, the M1-at-release
+classification, is 10.5281/zenodo.20101159.
 
 Usage
 -----
@@ -49,10 +51,13 @@ from pathlib import Path
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Default Zenodo DOI for the KRICO recruitment dataset (v1.0.0).
-# Update when releasing a new dataset version, then re-tag this repo so the
-# new code-data pairing is captured. Override at runtime with --doi.
-DEFAULT_DOI = "10.5281/zenodo.20101159"
+# Default Zenodo DOI for the KRICO recruitment dataset (v2.0.0).
+# Version-pinned deliberately, not a concept DOI: this is the dataset the
+# current code produces, so the full-pipeline and download paths agree. A
+# concept DOI here would silently pair future dataset versions with older
+# code. Update when releasing a new dataset version, then re-tag this repo so
+# the new code-data pairing is captured. Override at runtime with --doi.
+DEFAULT_DOI = "10.5281/zenodo.22548763"
 
 # Filename pattern for recruitment archives: recruitment_YYYY.tar.gz.
 ARCHIVE_PATTERN = re.compile(r"^recruitment_(\d{4})\.tar\.gz$")
@@ -343,6 +348,15 @@ def main():
     record_id = parse_record_id(args.doi)
     metadata = fetch_record_metadata(record_id)
     record_meta = metadata.get("metadata", {})
+
+    # Zenodo resolves a concept record ID to the latest version, so the record
+    # actually returned may differ from the one parsed out of --doi. File URLs
+    # must be built against the resolved record, not the requested one.
+    resolved_id = str(metadata.get("id", record_id))
+    if resolved_id != record_id:
+        print(f"Record {record_id} resolved to {resolved_id} "
+              f"(concept DOI resolves to the latest version).")
+        record_id = resolved_id
 
     print()
     print("=" * 72)
