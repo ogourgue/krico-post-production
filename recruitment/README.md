@@ -20,7 +20,8 @@ recruitment/
 ├── scripts/
 │   ├── process_cohort.py          # Single-cohort orchestration script
 │   ├── run_year.sh                # SLURM array driver (1 task per spawning year)
-│   ├── outcome_distribution.sh    # Dataset-wide outcome tally (see Validation)
+│   ├── outcome_distribution.py    # Dataset-wide outcome tally
+│   ├── outcome_distribution.sh    # SLURM driver for the tally (see Validation)
 │   ├── archive_by_year.sh         # Group cohort files into spawning-year tar.gz archives
 │   ├── extract_archives.sh        # Extract spawning-year archives back into individual files
 │   └── download_from_zenodo.py    # Download archives from Zenodo
