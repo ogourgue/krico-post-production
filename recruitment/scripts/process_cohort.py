@@ -80,7 +80,7 @@ def process_cohort(input_path, output_path, glorys_dir,
     # ------------------------------------------------------------------
     print("Integrating T-dependent development...")
     cumulative_dev = development.integrate_development(temperature)
-    calyptope_end_day = development.calyptope_window_end(cumulative_dev)
+    calyptopis_end_day = development.calyptopis_window_end(cumulative_dev)
     fiv_day = development.days_to_reach_stage(
         cumulative_dev, development.FIV_INDEX
     )
@@ -101,10 +101,10 @@ def process_cohort(input_path, output_path, glorys_dir,
     killed_M1 = filters.evaluate_M1(sic_at_spawning)
 
     # ------------------------------------------------------------------
-    # Step 4: M4 (calyptope starvation)
+    # Step 4: M4 (calyptopis starvation)
     # ------------------------------------------------------------------
     print("Evaluating M4...")
-    killed_M4, M4_kill_day = filters.evaluate_M4(sic, calyptope_end_day)
+    killed_M4, M4_kill_day = filters.evaluate_M4(sic, calyptopis_end_day)
     # A particle killed by M1 cannot subsequently be killed by M4.
     killed_M4 = killed_M4 & ~killed_M1
 

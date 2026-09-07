@@ -186,12 +186,12 @@ def days_to_reach_stage(cumulative_dev, stage_index):
     return first_day.astype(np.int64)
 
 
-def calyptope_window_end(cumulative_dev):
+def calyptopis_window_end(cumulative_dev):
     """
     For each particle, find the day index at which it completes CIII
     (cumulative_dev reaches 3, i.e. transitions from CIII to FI).
 
-    This defines the end of the CI-CIII calyptope window used by M4.
+    This defines the end of the CI-CIII calyptopis window used by M4.
 
     Parameters
     ----------
@@ -201,7 +201,7 @@ def calyptope_window_end(cumulative_dev):
     -------
     day_end : ndarray of shape (n_particles,), dtype int64
         Day index at which CIII completes. If the particle never finishes
-        CIII within the tracking period, returns n_obs (i.e., calyptope
+        CIII within the tracking period, returns n_obs (i.e., calyptopis
         window extends to end of tracking).
     """
     # Stage index 3 = FI, so reaching 3 means CIII just completed.

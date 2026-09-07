@@ -151,7 +151,7 @@ Outcome flag codes:
 | 6 | killed_M6_no_advance |
 | 7 | exited_domain |
 
-`censored` is a subcategory of `killed_M6_no_advance`: both refer to particles that survived the calyptope window and were alive at end of tracking with no detected sea-ice advance event. The `censored` label additionally marks particles whose classification is provisional because SIC was rising in the last 30 days of tracking, suggesting an advance event might have followed shortly after the cutoff. The two are kept as separate flag codes here so downstream analyses can distinguish them; figures in the Paper 1 repo fold censored into killed_M6 by default.
+`censored` is a subcategory of `killed_M6_no_advance`: both refer to particles that survived the calyptopis window and were alive at end of tracking with no detected sea-ice advance event. The `censored` label additionally marks particles whose classification is provisional because SIC was rising in the last 30 days of tracking, suggesting an advance event might have followed shortly after the cutoff. The two are kept as separate flag codes here so downstream analyses can distinguish them; figures in the Paper 1 repo fold censored into killed_M6 by default.
 
 ## End-of-tracking tolerance
 

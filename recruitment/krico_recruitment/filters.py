@@ -6,7 +6,7 @@ M1: Spawning cannot occur where sea ice concentration >= 80% at spawning.
     simulated, so the concentration is sampled from the reanalysis field at
     the release position on the spawning date (see sea_ice.spawning_sic)
     rather than read from the trajectory at day 0.
-M4: Calyptope stages (CI-CIII) starve after >10 consecutive days under
+M4: Calyptopis stages (CI-CIII) starve after >10 consecutive days under
     sea ice concentration > 40%. The duration of CI-CIII is
     temperature-dependent and trajectory-specific (from development module).
 
@@ -51,12 +51,12 @@ def evaluate_M1(sic_at_spawning):
         return np.nan_to_num(sic_at_spawning, nan=0.0) >= M1_SIC_THRESHOLD
 
 
-def evaluate_M4(sic, calyptope_end_day):
+def evaluate_M4(sic, calyptopis_end_day):
     """
-    Evaluate M4 (calyptope starvation under sea ice) for all particles.
+    Evaluate M4 (calyptopis starvation under sea ice) for all particles.
 
     For each particle, examine sea ice concentration along the trajectory
-    during its calyptope window (day 0 to calyptope_end_day exclusive).
+    during its calyptopis window (day 0 to calyptopis_end_day exclusive).
     If at any point in that window the particle experiences more than
     M4_MAX_CONSECUTIVE_DAYS consecutive days with SIC > M4_SIC_THRESHOLD,
     it is killed by M4.
@@ -65,9 +65,9 @@ def evaluate_M4(sic, calyptope_end_day):
     ----------
     sic : ndarray of shape (n_particles, n_obs)
         Sea ice concentration along trajectory (fraction, 0-1).
-    calyptope_end_day : ndarray of shape (n_particles,), dtype int64
+    calyptopis_end_day : ndarray of shape (n_particles,), dtype int64
         For each particle, day index at which CIII completes
-        (from development.calyptope_window_end).
+        (from development.calyptopis_window_end).
 
     Returns
     -------
@@ -96,9 +96,9 @@ def evaluate_M4(sic, calyptope_end_day):
     # reset trick for fully vectorized run-length on 2D arrays.
 
     for i in range(n_particles):
-        end = calyptope_end_day[i]
+        end = calyptopis_end_day[i]
         if end <= 0:
-            continue  # calyptope window is empty (already past CIII at t=0)
+            continue  # calyptopis window is empty (already past CIII at t=0)
 
         window = under_ice[i, :end]
         if not window.any():
