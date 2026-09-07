@@ -20,6 +20,7 @@ recruitment/
 ├── scripts/
 │   ├── process_cohort.py          # Single-cohort orchestration script
 │   ├── run_year.sh                # SLURM array driver (1 task per spawning year)
+│   ├── outcome_distribution.sh    # Dataset-wide outcome tally (see Validation)
 │   ├── archive_by_year.sh         # Group cohort files into spawning-year tar.gz archives
 │   ├── extract_archives.sh        # Extract spawning-year archives back into individual files
 │   └── download_from_zenodo.py    # Download archives from Zenodo
@@ -40,6 +41,8 @@ For users with access to the raw KRICO simulation outputs. Reproduces the recrui
 - HPC environment (SLURM cluster with Python 3.11+)
 - `KRICO_RUNS` environment variable set to the directory containing raw trajectory simulations (see main [README](../README.md))
 - `KRICO_GLORYS12` environment variable set to the GLORYS12 preprocessing output directory containing the monthly sea-ice files (`glorys12_ice_YYYY_MM.nc`). Required because M1 is evaluated at the spawning date, which precedes the trajectory — see [M1 at spawning](#m1-at-spawning) below.
+
+  These files must start at **October 1993**, one month earlier than the trajectories. The first cohort is released on 15 November 1993 and M1 reads back 24 days from there, to 22 October 1993, so `glorys12_ice_1993_10.nc` is required even though no particle is tracked in that month.
 
 **Workflow:**
 1. Submit the SLURM array job (one task per spawning year, 32 tasks total):
@@ -73,7 +76,7 @@ For users who want to analyze the recruitment outcomes without re-running the pi
 - ~100 GB peak disk space (42 GB compressed download + 56 GB extracted; archives can be deleted after extraction to reclaim 42 GB)
 
 **Workflow:**
-1. Download the dataset from Zenodo (10.5281/zenodo.20101159) into `recruitment/archives/`:
+1. Download the dataset from Zenodo ([10.5281/zenodo.22548763](https://doi.org/10.5281/zenodo.22548763)) into `recruitment/archives/`:
    ```bash
    cd recruitment/scripts
    python download_from_zenodo.py
@@ -87,16 +90,16 @@ After extraction, `recruitment/data/` contains 3,848 NetCDF files (one per relea
 
 ## Dataset versions
 
-The archived dataset and the current code do not presently produce the same classification.
-
-| Version | M1 evaluated at | Status |
+| Version | M1 evaluated at | DOI |
 |---|---|---|
-| v1.0.0 ([10.5281/zenodo.20101159](https://doi.org/10.5281/zenodo.20101159)) | Release date, from the trajectory at day 0 | Published; what Path B currently downloads |
-| v2 | Spawning date, from the GLORYS12 field | Produced by the current code; Zenodo upload pending |
+| v1.0.0 | Release date, from the trajectory at day 0 | [10.5281/zenodo.20101159](https://doi.org/10.5281/zenodo.20101159) |
+| **v2.0.0** | Spawning date, 24 days earlier, from the GLORYS12 field | [**10.5281/zenodo.22548763**](https://doi.org/10.5281/zenodo.22548763) |
 
-Path A therefore produces v2 while Path B retrieves v1. M1 is substantially larger under v2 — evaluating the constraint at release rather than at spawning underestimates early-season spawning suppression — and every outcome downstream of M1 shifts accordingly. This note will be replaced by a version table once v2 is uploaded.
+v2.0.0 is what the current code produces and what Path B downloads by default, so the two paths agree. v1.0.0 remains available for anyone who needs the release-date classification; pass `--doi` to `download_from_zenodo.py` to retrieve it.
 
-Output files from v2 carry the evaluation provenance as global attributes (`m1_spawning_offset_days`, `m1_spawning_date`, `m1_sic_source`); v1 files have none, which distinguishes them.
+The two are not interchangeable. Evaluating M1 at release rather than at spawning underestimates early-season spawning suppression: M1 is 5.19 percentage points lower under v1.0.0, and every outcome downstream of it shifts accordingly. Files from the two versions must not be combined in a single analysis.
+
+Output files from v2.0.0 carry the evaluation provenance as global attributes (`m1_spawning_offset_days`, `m1_spawning_date`, `m1_sic_source`); v1.0.0 files have none, which distinguishes them.
 
 ## M1 at spawning
 
@@ -119,7 +122,7 @@ cd recruitment/scripts
 ./archive_by_year.sh
 ```
 
-This produces 32 archives in `recruitment/archives/` (one per spawning year, 1994–2025), each containing ~121 cohort files.
+This produces 32 archives in `recruitment/archives/` (one per spawning year, 1994–2025), each containing 120 cohort files — 121 in the eight leap years, which is how 32 spawning years give 3,848 cohorts.
 
 ## Output schema
 
@@ -163,9 +166,9 @@ Python ≥ 3.11, `numpy`, `xarray`, `pandas`, `netCDF4`.
 
 ## Validation
 
-Dataset-wide outcome distribution over the full 32-year run (1994–2025, 3 848 cohorts, ≈ 2.1 × 10⁹ particles):
+Dataset-wide outcome distribution over the full 32-year run (1994–2025, 3 848 cohorts, ≈ 2.1 × 10⁹ particles). Counts and fractions are for v2.0.0, the current classification with M1 at spawning; the last column gives the v1.0.0 fraction, with M1 at release, for comparison.
 
-| outcome | count | fraction | v1 (M1 at release) |
+| outcome | count (v2.0.0) | fraction (v2.0.0) | fraction (v1.0.0) |
 |---|---:|---:|---:|
 | success | 110,417,165 | 5.26% | 5.83% |
 | censored | 27,221,228 | 1.30% | 1.42% |

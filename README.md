@@ -52,6 +52,6 @@ The raw trajectory data are not currently publicly archived due to storage const
 
 ## Analyses
 
-* __[recruitment/](recruitment/)__ — Per-particle classification into 8 outcome states (success, censored, killed by mortality filters M1/M4/M5/M6, exited domain). Outputs available on Zenodo (DOI: [10.5281/zenodo.20101159](https://doi.org/10.5281/zenodo.20101159)).
+* __[recruitment/](recruitment/)__ — Per-particle classification into 8 outcome states (success, censored, killed by mortality filters M1/M4/M5/M6, exited domain). Outputs available on Zenodo (DOI: [10.5281/zenodo.22548763](https://doi.org/10.5281/zenodo.22548763)).
 
 Additional analysis subfolders will be added as the project progresses.
