@@ -28,6 +28,8 @@ Each analysis subfolder is self-contained, with its own scripts, data, and docum
 
 ## Setup
 
+The pipeline runs on Python 3.13.13 and does not require Parcels: it reads the trajectory output rather than producing it. Dependencies are `numpy`, `xarray`, `pandas` and `netCDF4`.
+
 Clone the repository wherever you like:
 
 ```bash

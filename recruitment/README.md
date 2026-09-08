@@ -39,7 +39,7 @@ There are two ways to obtain the recruitment data:
 For users with access to the raw KRICO simulation outputs. Reproduces the recruitment classification from scratch.
 
 **Prerequisites:**
-- HPC environment (SLURM cluster with Python 3.11+)
+- HPC environment (SLURM cluster with Python 3.13.13)
 - `KRICO_RUNS` environment variable set to the directory containing raw trajectory simulations (see main [README](../README.md))
 - `KRICO_GLORYS12` environment variable set to the GLORYS12 preprocessing output directory containing the monthly sea-ice files (`glorys12_ice_YYYY_MM.nc`). Required because M1 is evaluated at the spawning date, which precedes the trajectory — see [M1 at spawning](#m1-at-spawning) below.
 
@@ -163,7 +163,7 @@ The constant lives in `krico_recruitment/sea_ice.py`.
 
 ## Dependencies
 
-Python ≥ 3.11, `numpy`, `xarray`, `pandas`, `netCDF4`.
+Python 3.13.13, `numpy`, `xarray`, `pandas`, `netCDF4`. Parcels is not required.
 
 ## Validation
 
