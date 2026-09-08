@@ -26,6 +26,19 @@ B = 1.0479
 # Stage-specific coefficients from Thorpe (2019) Table 1.
 # Only stages from CI onward are needed (particles start post-ascent).
 # Order: CI, CII, CIII, FI, FII, FIII, FIV, FV, FVI.
+#
+# Two pairs below carry identical coefficients: FIII and FIV, and FI and FVI.
+# This is as published -- Table 1 also gives MN the same values as CIII -- and
+# is not a transcription slip. Verified against the printed table: all 18
+# values match, and y0 + a * exp(-b * T) reproduces the tabulated durations at
+# -1 to 4 degC to one decimal place.
+#
+# The table is close to a lattice: a is an exact multiple of 0.2112 and
+# y0 = 3.73542 * a, so the duration at 0 degC is an integer number of days
+# (CI 14, CII 9, CIII 10, FI 12, FII 11, FIII 13, FIV 13, FV 15, FVI 12).
+# FII is the one stage off the lattice, by 0.009 d; the value here is Thorpe's
+# printed 8.6871 rather than the 8.6781 the lattice would give. Both reproduce
+# every tabulated duration to one decimal place, so the published value stands.
 STAGES = ("CI", "CII", "CIII", "FI", "FII", "FIII", "FIV", "FV", "FVI")
 
 Y0 = np.array([
