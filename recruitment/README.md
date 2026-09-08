@@ -108,9 +108,9 @@ M1 represents a constraint acting on the spawning adult: spawning does not occur
 
 M1 is instead evaluated at the release position on the spawning date, sampling the GLORYS12 sea-ice field directly. The release position stands as the spawning position, consistent with the model's neglect of transport during the descent-ascent interval.
 
-The offset is a constant, `SPAWNING_OFFSET_DAYS = 24` in `krico_recruitment/sea_ice.py`, the midpoint of the 23-26 day range given by Thorpe et al. (2019). Varying it across that range changes the domain-wide M1 fraction by less than one percentage point; see `S1_m1_offset_sensitivity/` in the [krico-paper1](https://github.com/ogourgue/krico-paper1) repo.
+The offset is a constant, `SPAWNING_OFFSET_DAYS = 24` in `krico_recruitment/sea_ice.py`, taken from the 23-26 day range given by Thorpe et al. (2019). Varying it across that range changes the domain-wide M1 fraction by 0.72 percentage points, from 28.11% to 28.83%; see `S1_m1_offset_sensitivity/` in the [krico-paper1](https://github.com/ogourgue/krico-paper1) repo.
 
-Sampling is nearest-neighbour on the reanalysis grid, whereas Parcels interpolates when sampling along trajectories. Compared against the trajectory value at day 0, the two agree to a mean absolute difference of 2.4 × 10⁻⁶, with disagreement above 0.01 confined to 0.005% of particles in coastal cells where the field has a sharp gradient, and one particle in 545 807 classified differently.
+Sampling is nearest-neighbour on the reanalysis grid, whereas Parcels interpolates when sampling along trajectories. Compared against the trajectory value at day 0 across the full 32-year record, the two agree to a mean absolute difference of 1.2 × 10⁻⁵ in sea-ice concentration, and 1.8 × 10⁻⁵ of particles are classified differently. The largest disagreements are in coastal cells where the field has a sharp gradient.
 
 M1 is the only filter affected. M4 acts from calyptopis I onward, which is the release, and M5 and M6 are triggered by calendar events during tracking.
 
@@ -190,4 +190,4 @@ cd recruitment/scripts
 sbatch outcome_distribution.sh          # writes to recruitment/data/
 ```
 
-Per-cohort qualitative behaviors match Thorpe (2019): success rate peaks in mid-January; M1 declines as ice retreats through the season; M4 peaks in late summer; M5_no_FIV rises monotonically into March as the time available to reach FIV shrinks. See `F2_phenology_curve` and `F3_outcome_composition` in the [krico-paper1](https://github.com/ogourgue/krico-paper1) repo for the visual breakdown.
+Per-cohort qualitative behaviors match Thorpe (2019): success rate peaks in late January; M1 declines as ice retreats through the season; M4 peaks in late summer; M5_no_FIV rises monotonically into March as the time available to reach FIV shrinks. See `F2_phenology_curve` and `F3_outcome_composition` in the [krico-paper1](https://github.com/ogourgue/krico-paper1) repo for the visual breakdown.

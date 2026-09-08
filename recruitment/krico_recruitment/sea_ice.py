@@ -50,9 +50,9 @@ ADVANCE_MIN_CONSECUTIVE_DAYS = 5   # SIC above threshold for this many days
 END_OF_TRACKING_TOLERANCE = 1
 
 # Descent-ascent duration from spawning to calyptopis I. Thorpe et al. (2019)
-# give 23-26 days; the midpoint is applied as a constant. Varying it across
-# that range changes the domain-wide M1 fraction by less than one percentage
-# point — see krico-paper1/S1_m1_offset_sensitivity/.
+# give 23-26 days; 24 is applied as a constant. Varying it across that range
+# changes the domain-wide M1 fraction by 0.72 percentage points, from 28.11%
+# to 28.83% — see krico-paper1/S1_m1_offset_sensitivity/.
 SPAWNING_OFFSET_DAYS = 24
 
 GLORYS_ICE_PATTERN = "glorys12_ice_{year:04d}_{month:02d}.nc"
