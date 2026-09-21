@@ -19,8 +19,7 @@ krico-post-production/
 │   ├── krico_recruitment/         # Python package
 │   ├── scripts/                   # Processing and data management scripts
 │   ├── data/                      # Recruitment NetCDF files (gitignored)
-│   ├── archives/                  # Tar.gz archives (gitignored)
-│   └── tests/
+│   └── archives/                  # Tar.gz archives (gitignored)
 └── ...                            # Additional analysis subfolders (to be added)
 ```
 

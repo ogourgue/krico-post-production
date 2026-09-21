@@ -25,7 +25,6 @@ recruitment/
 │   ├── archive_by_year.sh         # Group cohort files into spawning-year tar.gz archives
 │   ├── extract_archives.sh        # Extract spawning-year archives back into individual files
 │   └── download_from_zenodo.py    # Download archives from Zenodo
-├── tests/
 ├── data/                          # Recruitment outputs (gitignored)
 └── archives/                      # Spawning-year tar.gz archives (gitignored)
 ```
