@@ -16,16 +16,25 @@ recruitment/
 │   ├── filters.py                 # M1 and M4 evaluation
 │   ├── sea_ice.py                 # Sea-ice at spawning, advance detection, censoring
 │   ├── trajectory.py              # Path length, pick-at-day utilities
-│   └── io.py                      # NetCDF read / write
+│   ├── io.py                      # NetCDF read / write
+│   ├── nsidc_grid.py              # NSIDC 25 km polar-stereographic grid geometry
+│   └── nsidc_ice.py               # NSIDC sea ice at spawning and along trajectories
 ├── scripts/
 │   ├── process_cohort.py          # Single-cohort orchestration script
 │   ├── run_year.sh                # SLURM array driver (1 task per spawning year)
+│   ├── run_year_nsidc.sh          # Same, with NSIDC sea ice (see Ice-source test)
+│   ├── download_nsidc.py / .sh    # Daily NSIDC G02202 v6 files (Python + SLURM array)
+│   ├── nsidc_daily_provenance.txt # DOI, URL, access date, sha256 of every daily file
+│   ├── preprocess_nsidc.py / .sh  # Daily files -> monthly stacks on the native grid
+│   ├── validate_nsidc.py          # NSIDC vs GLORYS12 ice readings on given cohorts
+│   ├── validate_nsidc.csv         # The four-cohort validation behind run_year_nsidc.sh
 │   ├── outcome_distribution.py    # Dataset-wide outcome tally
 │   ├── outcome_distribution.sh    # SLURM driver for the tally (see Validation)
 │   ├── archive_by_year.sh         # Group cohort files into spawning-year tar.gz archives
 │   ├── extract_archives.sh        # Extract spawning-year archives back into individual files
 │   └── download_from_zenodo.py    # Download archives from Zenodo
 ├── data/                          # Recruitment outputs (gitignored)
+├── data_nsidc/                    # Recruitment outputs with NSIDC sea ice (gitignored)
 └── archives/                      # Spawning-year tar.gz archives (gitignored)
 ```
 
@@ -112,6 +121,24 @@ The offset is a constant, `SPAWNING_OFFSET_DAYS = 24` in `krico_recruitment/sea_
 Sampling is nearest-neighbour on the reanalysis grid, whereas Parcels interpolates when sampling along trajectories. Compared against the trajectory value at day 0 across the full 32-year record, the two agree to a mean absolute difference of 1.2 × 10⁻⁵ in sea-ice concentration, and 1.8 × 10⁻⁵ of particles are classified differently. The largest disagreements are in coastal cells where the field has a sharp gradient.
 
 M1 is the only filter affected. M4 acts from calyptopis I onward, which is the release, and M5 and M6 are triggered by calendar events during tracking.
+
+## Ice-source test (NSIDC sea ice)
+
+GLORYS12 is forced by ERA-Interim up to 31 December 2018 and by ERA5 from 1 January 2019. To test whether that switch leaves a mark in the ice-dependent outcomes, the classification can be rerun on the same trajectories with every sea-ice concentration it reads, M1 at spawning and the along-trajectory series behind M4, the advance detection and censoring, taken from the NOAA/NSIDC Climate Data Record of Passive Microwave Sea Ice Concentration, version 6 (G02202, doi:10.7265/b18j-z797) instead of GLORYS12. The trajectories, and so the circulation behind M5b, are unchanged.
+
+Inputs are built once, into `$KRICO_NSIDC` (e.g. `/scratch/cvan/KRICO/Pre/NSIDC`):
+
+```bash
+cd scripts && mkdir -p logs
+sbatch download_nsidc.sh                 # daily files, 1993-10-01 to 2025-10-31, ~4 GB
+python3 download_nsidc.py --provenance   # when all tasks are done; commit the provenance file
+python3 preprocess_nsidc.py --check-grid # grid geometry against the ancillary lat/lon
+sbatch preprocess_nsidc.sh               # monthly stacks nsidc_ice_YYYY_MM.nc, 385 files
+```
+
+Then `sbatch run_year_nsidc.sh` runs the classification into `data_nsidc/`, with `--ice-source nsidc` passed to `process_cohort.py`. Output files carry `sic_source = "NSIDC G02202 v6 (...)"` and `nsidc_nearest_ocean`; the production files carry `sic_source = "GLORYS12"` (v2.0.0 files predate the attribute and have only `m1_sic_source`). The two sets must not be combined.
+
+Sampling reads the 25 km cell containing each position, with no interpolation (`krico_recruitment/nsidc_ice.py`). Coast and land cells are fill in the CDR and read NaN, which the filters treat as below threshold; a nearest-ocean redirection exists (`--nsidc-nearest-ocean`) but is not used, because on four cohorts spanning the record coast cells hold 0.3-0.4% of positions and move M1 by at most 0.4 points. On those cohorts the two readings agree along trajectories to r = 0.97-0.98 and a mean absolute difference of 0.035-0.044 in concentration, M1 differs by 2-4 points in either direction, and advance detection by under 1 point (`scripts/validate_nsidc.csv`). The 2.2% of release positions north of the NSIDC grid edge (50-51°S, 8°W-7°E, in 48.6N) read NaN and get the same outcome in both products, since neither has ice there.
 
 ## Archiving (project maintainer)
 
