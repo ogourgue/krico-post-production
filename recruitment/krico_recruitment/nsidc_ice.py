@@ -56,6 +56,20 @@ SURFACE_OCEAN = 50
 
 SOURCE_ID = "NSIDC G02202 v6 (doi:10.7265/b18j-z797)"
 
+# A second product in the same file format: GLORYS12 ice binned onto the
+# NSIDC grid by scripts/preprocess_glorys12_25km.py, read with the same code
+# so that the only difference between the two runs is the ice values.
+SOURCES = {
+    "nsidc": {
+        "pattern": NSIDC_ICE_PATTERN,
+        "id": SOURCE_ID,
+    },
+    "glorys12_25km": {
+        "pattern": "glorys12_25km_ice_{year:04d}_{month:02d}.nc",
+        "id": "GLORYS12v1 ice binned onto the NSIDC G02202 25 km grid",
+    },
+}
+
 # Raw monthly arrays (uint8, (ndays, NROW, NCOL), ~3 MB each) cached by
 # (dir, year, month). A cohort needs at most 9 consecutive months (spawning
 # date to release + 200 days); consecutive cohorts overlap almost entirely.
@@ -71,11 +85,11 @@ _NEAREST_OCEAN = {}
 CHUNK = 20_000
 
 
-def _load_month(nsidc_dir, year, month):
+def _load_month(nsidc_dir, year, month, pattern=NSIDC_ICE_PATTERN):
     """Raw uint8 concentration of one month, (ndays, NROW, NCOL), and its days."""
-    key = (str(nsidc_dir), year, month)
+    key = (str(nsidc_dir), pattern, year, month)
     if key not in _MONTH_CACHE:
-        path = f"{nsidc_dir}/" + NSIDC_ICE_PATTERN.format(year=year, month=month)
+        path = f"{nsidc_dir}/" + pattern.format(year=year, month=month)
         with xr.open_dataset(path, mask_and_scale=False) as ds:
             raw = np.asarray(ds[VAR].values, dtype=np.uint8)
             days = pd.DatetimeIndex(ds["time"].values).normalize()
@@ -87,7 +101,7 @@ def _load_month(nsidc_dir, year, month):
     return _MONTH_CACHE[key]
 
 
-def _load_range(nsidc_dir, first_day, last_day):
+def _load_range(nsidc_dir, first_day, last_day, pattern=NSIDC_ICE_PATTERN):
     """
     Raw concentration for every day from first_day to last_day inclusive,
     as one (n_days, NROW, NCOL) uint8 array. Raises if a day is missing.
@@ -98,7 +112,7 @@ def _load_range(nsidc_dir, first_day, last_day):
 
     blocks, got = [], []
     for period in pd.period_range(first_day, last_day, freq="M"):
-        raw, days = _load_month(nsidc_dir, period.year, period.month)
+        raw, days = _load_month(nsidc_dir, period.year, period.month, pattern)
         keep = (days >= first_day) & (days <= last_day)
         blocks.append(raw[keep])
         got.append(days[keep])
@@ -167,23 +181,27 @@ def _read(raw, t, row, col, nsidc_dir, nearest_ocean):
 
 
 def spawning_sic(lon, lat, release_date, nsidc_dir,
-                 offset_days=SPAWNING_OFFSET_DAYS, nearest_ocean=False):
+                 offset_days=SPAWNING_OFFSET_DAYS, nearest_ocean=False,
+                 pattern=NSIDC_ICE_PATTERN):
     """
     Concentration at the release position on the spawning date, from the
-    NSIDC record. Same contract as sea_ice.spawning_sic.
+    NSIDC record (or another product in the same format, via pattern).
+    Same contract as sea_ice.spawning_sic.
     """
     release_date = pd.Timestamp(release_date).normalize()
     spawning_date = release_date - pd.Timedelta(days=int(offset_days))
-    raw = _load_range(nsidc_dir, spawning_date, spawning_date)
+    raw = _load_range(nsidc_dir, spawning_date, spawning_date, pattern)
     row, col = cell_index(lon, lat)
     t = np.zeros(row.shape, dtype=np.int64)
     return _read(raw, t, row, col, nsidc_dir, nearest_ocean)
 
 
-def along_trajectory_sic(lon, lat, release_date, nsidc_dir, nearest_ocean=False):
+def along_trajectory_sic(lon, lat, release_date, nsidc_dir, nearest_ocean=False,
+                         pattern=NSIDC_ICE_PATTERN):
     """
-    Concentration along the trajectory from the NSIDC record: obs k of each
-    particle is read on release_date + k days at (lon[:, k], lat[:, k]).
+    Concentration along the trajectory from the NSIDC record (or another
+    product in the same format, via pattern): obs k of each particle is read
+    on release_date + k days at (lon[:, k], lat[:, k]).
 
     Returns (n_particles, n_obs) float64, fraction 0-1, NaN where the
     position is NaN, off the grid, or on a fill (land/coast/lake) cell.
@@ -196,7 +214,7 @@ def along_trajectory_sic(lon, lat, release_date, nsidc_dir, nearest_ocean=False)
 
     release_date = pd.Timestamp(release_date).normalize()
     raw = _load_range(nsidc_dir, release_date,
-                      release_date + pd.Timedelta(days=n_obs - 1))
+                      release_date + pd.Timedelta(days=n_obs - 1), pattern)
 
     t = np.broadcast_to(np.arange(n_obs, dtype=np.int32), (CHUNK, n_obs))
     out = np.empty((n_particles, n_obs), dtype="float32")

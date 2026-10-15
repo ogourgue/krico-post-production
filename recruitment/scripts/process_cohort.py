@@ -9,6 +9,8 @@ Usage
         --glorys <GLORYS12 ice directory> [--offset 24]
     python process_cohort.py <input_trajectory.nc> <output_recruitment.nc> \
         --ice-source nsidc --nsidc <NSIDC ice directory> [--nsidc-nearest-ocean]
+    python process_cohort.py <input_trajectory.nc> <output_recruitment.nc> \
+        --ice-source glorys12_25km --nsidc <GLORYS12-on-25-km directory>
 
 The input file is one of the KRICO simulation outputs (e.g. 1993_11_15.nc).
 The output file contains one row per particle with the 9-column schema
@@ -25,6 +27,10 @@ instead of GLORYS12, sampled at the same positions and days; the
 trajectories themselves are unchanged. This is the ice-source test for the
 ERA-Interim/ERA5 forcing change in GLORYS12 (see krico_recruitment.nsidc_ice).
 The default, --ice-source glorys12, reproduces the v2.0.0 classification.
+--ice-source glorys12_25km reads GLORYS12 ice binned onto the NSIDC grid
+(preprocess_glorys12_25km.py) through the same sampler as nsidc, so that
+the difference between the two is the ice values alone; --nsidc then names
+that directory.
 """
 
 import argparse
@@ -60,10 +66,11 @@ def process_cohort(input_path, output_path, glorys_dir,
     trajectory's own sea_ice_area_fraction) or "nsidc" (everything from the
     NSIDC monthly files in nsidc_dir, sampled at the trajectory positions).
     """
-    if ice_source not in ("glorys12", "nsidc"):
+    if ice_source not in ("glorys12", *nsidc_ice.SOURCES):
         raise ValueError(f"unknown ice_source {ice_source!r}")
-    if ice_source == "nsidc" and nsidc_dir is None:
-        raise ValueError("ice_source='nsidc' requires nsidc_dir")
+    if ice_source in nsidc_ice.SOURCES and nsidc_dir is None:
+        raise ValueError(f"ice_source={ice_source!r} requires nsidc_dir")
+    gridded = nsidc_ice.SOURCES.get(ice_source)
     if ice_source == "glorys12" and glorys_dir is None:
         raise ValueError("ice_source='glorys12' requires glorys_dir")
     print(f"Reading trajectory file: {input_path}")
@@ -89,11 +96,12 @@ def process_cohort(input_path, output_path, glorys_dir,
     # Along-trajectory sea-ice concentration, (n_particles, n_obs). From the
     # trajectory file (GLORYS12, interpolated by Parcels at run time) or
     # re-sampled from the NSIDC record at the stored positions and days.
-    if ice_source == "nsidc":
-        print(f"Sampling NSIDC sea ice along trajectories from {nsidc_dir}"
+    if gridded:
+        print(f"Sampling {gridded['id']} along trajectories from {nsidc_dir}"
               + (" (nearest ocean cell for coast/land)" if nsidc_nearest_ocean else ""))
         sic = nsidc_ice.along_trajectory_sic(lon, lat, release_date, nsidc_dir,
-                                             nearest_ocean=nsidc_nearest_ocean)
+                                             nearest_ocean=nsidc_nearest_ocean,
+                                             pattern=gridded["pattern"])
     else:
         sic = ds["sea_ice_area_fraction"].values
 
@@ -129,10 +137,10 @@ def process_cohort(input_path, output_path, glorys_dir,
     spawning_date = release_date.normalize() - pd.Timedelta(days=offset_days)
     print(f"Evaluating M1 at spawning ({spawning_date.date()}, "
           f"{offset_days} days before release)...")
-    if ice_source == "nsidc":
+    if gridded:
         sic_at_spawning = nsidc_ice.spawning_sic(
             lon[:, 0], lat[:, 0], release_date, nsidc_dir, offset_days,
-            nearest_ocean=nsidc_nearest_ocean
+            nearest_ocean=nsidc_nearest_ocean, pattern=gridded["pattern"]
         )
     else:
         sic_at_spawning = sea_ice.spawning_sic(
@@ -307,8 +315,8 @@ def process_cohort(input_path, output_path, glorys_dir,
     with Dataset(output_path, "a") as nc:
         nc.m1_spawning_offset_days = int(offset_days)
         nc.m1_spawning_date = str(spawning_date.date())
-        if ice_source == "nsidc":
-            nc.sic_source = nsidc_ice.SOURCE_ID
+        if gridded:
+            nc.sic_source = gridded["id"]
             nc.m1_sic_source = str(nsidc_dir)
             nc.trajectory_sic_source = str(nsidc_dir)
             nc.nsidc_nearest_ocean = int(bool(nsidc_nearest_ocean))
@@ -339,15 +347,17 @@ def main():
              "at the spawning date (required with --ice-source glorys12)",
     )
     parser.add_argument(
-        "--ice-source", choices=("glorys12", "nsidc"), default="glorys12",
+        "--ice-source", choices=("glorys12", *nsidc_ice.SOURCES), default="glorys12",
         help="Where sea-ice concentration is read from (default glorys12). "
              "nsidc: M1 and the along-trajectory series from the NSIDC "
-             "G02202 v6 monthly files, sampled at the trajectory positions",
+             "G02202 v6 monthly files, sampled at the trajectory positions; "
+             "glorys12_25km: the same sampler on GLORYS12 ice binned onto the "
+             "NSIDC grid (preprocess_glorys12_25km.py)",
     )
     parser.add_argument(
         "--nsidc", type=str, default=None,
-        help="Directory holding nsidc_ice_YYYY_MM.nc and ancillary/ "
-             "(required with --ice-source nsidc)",
+        help="Directory holding the monthly stacks and ancillary/ "
+             "(required with --ice-source nsidc or glorys12_25km)",
     )
     parser.add_argument(
         "--nsidc-nearest-ocean", action="store_true",
@@ -363,8 +373,8 @@ def main():
     args = parser.parse_args()
     if args.ice_source == "glorys12" and args.glorys is None:
         parser.error("--glorys is required with --ice-source glorys12")
-    if args.ice_source == "nsidc" and args.nsidc is None:
-        parser.error("--nsidc is required with --ice-source nsidc")
+    if args.ice_source in nsidc_ice.SOURCES and args.nsidc is None:
+        parser.error(f"--nsidc is required with --ice-source {args.ice_source}")
 
     process_cohort(args.input, args.output, args.glorys, args.offset,
                    ice_source=args.ice_source, nsidc_dir=args.nsidc,
