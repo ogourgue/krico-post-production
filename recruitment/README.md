@@ -23,9 +23,11 @@ recruitment/
 │   ├── process_cohort.py          # Single-cohort orchestration script
 │   ├── run_year.sh                # SLURM array driver (1 task per spawning year)
 │   ├── run_year_nsidc.sh          # Same, with NSIDC sea ice (see Ice-source test)
+│   ├── run_year_glorys12_25km.sh  # Same, with GLORYS12 ice on the NSIDC grid
 │   ├── download_nsidc.py / .sh    # Daily NSIDC G02202 v6 files (Python + SLURM array)
 │   ├── nsidc_daily_provenance.txt # DOI, URL, access date, sha256 of every daily file
 │   ├── preprocess_nsidc.py / .sh  # Daily files -> monthly stacks on the native grid
+│   ├── preprocess_glorys12_25km.py / .sh  # GLORYS12 ice binned onto the NSIDC grid
 │   ├── validate_nsidc.py          # NSIDC vs GLORYS12 ice readings on given cohorts
 │   ├── validate_nsidc.csv         # The four-cohort validation behind run_year_nsidc.sh
 │   ├── outcome_distribution.py    # Dataset-wide outcome tally
@@ -35,6 +37,7 @@ recruitment/
 │   └── download_from_zenodo.py    # Download archives from Zenodo
 ├── data/                          # Recruitment outputs (gitignored)
 ├── data_nsidc/                    # Recruitment outputs with NSIDC sea ice (gitignored)
+├── data_glorys12_25km/            # Same, with GLORYS12 ice on the NSIDC grid (gitignored)
 └── archives/                      # Spawning-year tar.gz archives (gitignored)
 ```
 
@@ -137,6 +140,8 @@ sbatch preprocess_nsidc.sh               # monthly stacks nsidc_ice_YYYY_MM.nc, 
 ```
 
 Then `sbatch run_year_nsidc.sh` runs the classification into `data_nsidc/`, with `--ice-source nsidc` passed to `process_cohort.py`. Output files carry `sic_source = "NSIDC G02202 v6 (...)"` and `nsidc_nearest_ocean`; the production files carry `sic_source = "GLORYS12"` (v2.0.0 files predate the attribute and have only `m1_sic_source`). The two sets must not be combined.
+
+A third classification separates resolution from product in the comparison: `preprocess_glorys12_25km.py` bins the GLORYS12 monthly ice onto the NSIDC grid (plain mean of the ORCA12 cells inside each 25 km cell, NSIDC land/coast/lake as fill) into `$KRICO_GLORYS12_25KM`, and `run_year_glorys12_25km.sh` runs the classification on it through the same sampler (`--ice-source glorys12_25km`) into `data_glorys12_25km/`, with `sic_source = "GLORYS12v1 ice binned onto the NSIDC G02202 25 km grid"`. Native GLORYS12 minus this run is the resolution and sampling effect; this run minus NSIDC is the product difference at equal resolution. On the full record the resolution effect is at or below 0.1 percentage points for every outcome domain-wide, so the whole GLORYS12-versus-NSIDC difference is in the ice values.
 
 Sampling reads the 25 km cell containing each position, with no interpolation (`krico_recruitment/nsidc_ice.py`). Coast and land cells are fill in the CDR and read NaN, which the filters treat as below threshold; a nearest-ocean redirection exists (`--nsidc-nearest-ocean`) but is not used, because on four cohorts spanning the record coast cells hold 0.3-0.4% of positions and move M1 by at most 0.4 points. On those cohorts the two readings agree along trajectories to r = 0.97-0.98 and a mean absolute difference of 0.035-0.044 in concentration, M1 differs by 2-4 points in either direction, and advance detection by under 1 point (`scripts/validate_nsidc.csv`). The 2.2% of release positions north of the NSIDC grid edge (50-51°S, 8°W-7°E, in 48.6N) read NaN and get the same outcome in both products, since neither has ice there.
 
