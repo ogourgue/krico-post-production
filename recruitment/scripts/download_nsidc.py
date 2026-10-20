@@ -8,10 +8,14 @@ Usage
     python3 download_nsidc.py YEAR          # one year, into $KRICO_NSIDC/daily/YEAR/
     python3 download_nsidc.py --provenance  # after all years: checksums + missing dates
 
-Period: 1993-10-01 to 2025-10-31. The first cohort is released on
-15 November 1993 and M1 reads back 24 days to 22 October 1993; the last
-cohort is released on 14 March 2025 and tracked 200 days, to 30 September
-2025. One month of margin on either side.
+Period: 1993-02-01 to 2026-02-28. The recruitment classification needs
+1993-10-01 to 2025-10-31: the first cohort is released on 15 November 1993
+and M1 reads back 24 days to 22 October 1993; the last cohort is released
+on 14 March 2025 and tracked 200 days, to 30 September 2025; one month of
+margin on either side. The ice-timing series of krico-paper2 (retreat and
+advance day per cell) need whole ice years, 15 February to 14 February,
+for spawning years 1994-2025, hence the extension to February 1993 and
+February 2026.
 
 Layout, mirroring the GLORYS12 preprocessing directory:
     $KRICO_NSIDC/ancillary/G02202-ancillary-pss25-v06r00.nc   grid + masks
@@ -59,8 +63,8 @@ BASE_URL = os.environ.get(
     "NSIDC_BASE_URL", "https://noaadata.apps.nsidc.org/NOAA/G02202_V6"
 )
 DOI = "10.7265/b18j-z797"
-DATE_MIN = date(1993, 10, 1)
-DATE_MAX = date(2025, 10, 31)
+DATE_MIN = date(1993, 2, 1)
+DATE_MAX = date(2026, 2, 28)
 ANCILLARY = "G02202-ancillary-pss25-v06r00.nc"
 FILE_RE = re.compile(r"sic_pss25_(\d{8})_[A-Za-z0-9]+_v06r00\.nc")
 RETRIES = 5

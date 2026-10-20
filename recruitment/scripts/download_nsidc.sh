@@ -3,7 +3,7 @@
 #SBATCH --qos=nf
 #SBATCH --time=02:00:00
 #SBATCH --mem=2G
-#SBATCH --array=0-32%6
+#SBATCH --array=0-33%6
 #SBATCH --output=logs/nsidc_dl_%A_%a.out
 #SBATCH --error=logs/nsidc_dl_%A_%a.err
 
@@ -11,7 +11,7 @@
 # Download the daily NSIDC G02202 v6 sea-ice files — SLURM array
 # ============================================================================
 #
-# One array task per calendar year: index 0-32 maps to 1993-2025 (SLURM caps
+# One array task per calendar year: index 0-33 maps to 1993-2026 (SLURM caps
 # array indices below MaxArraySize, so the year itself cannot be the index).
 # At most 6 tasks run at once so that NSIDC does not see 33 parallel clients.
 # Each task calls download_nsidc.py for its year; the script is resumable, so

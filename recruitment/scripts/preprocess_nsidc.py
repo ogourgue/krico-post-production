@@ -26,7 +26,7 @@ of the download established that the archive has one file per day of the
 period, and a silent gap here would propagate into the along-trajectory
 sampling as a NaN, which the filters treat as "below threshold".
 
-Period: 1993-10-01 to 2025-10-31, as in download_nsidc.py.
+Period: 1993-02-01 to 2026-02-28, as in download_nsidc.py.
 
 Environment
 -----------
@@ -47,8 +47,8 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from krico_recruitment import nsidc_grid  # noqa: E402
 
-DATE_MIN = date(1993, 10, 1)
-DATE_MAX = date(2025, 10, 31)
+DATE_MIN = date(1993, 2, 1)
+DATE_MAX = date(2026, 2, 28)
 ANCILLARY = "G02202-ancillary-pss25-v06r00.nc"
 FILE_RE = re.compile(r"sic_pss25_(\d{8})_([A-Za-z0-9]+)_v06r00\.nc")
 VAR = "cdr_seaice_conc"

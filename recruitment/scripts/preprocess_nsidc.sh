@@ -3,7 +3,7 @@
 #SBATCH --qos=nf
 #SBATCH --time=01:00:00
 #SBATCH --mem=4G
-#SBATCH --array=0-32
+#SBATCH --array=0-33
 #SBATCH --output=logs/nsidc_pre_%A_%a.out
 #SBATCH --error=logs/nsidc_pre_%A_%a.err
 
@@ -11,7 +11,7 @@
 # Stack the daily NSIDC G02202 v6 files into monthly files — SLURM array
 # ============================================================================
 #
-# One array task per calendar year, index 0-32 = 1993-2025, as in
+# One array task per calendar year, index 0-33 = 1993-2026, as in
 # download_nsidc.sh. Each task writes the nsidc_ice_YYYY_MM.nc files of its
 # year into $KRICO_NSIDC; months already there are skipped, so a failed task
 # is resubmitted with index = year - 1993:
