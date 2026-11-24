@@ -35,9 +35,9 @@ verify nothing. --provenance records instead the product, DOI, dataset version,
 toolbox version, subset and access date, with the days and size of each file,
 in pisces_chl_provenance.txt (next to this script, tracked in git).
 
-Access needs the Copernicus Marine toolbox (pip install copernicusmarine,
-Python >= 3.10) and a free Copernicus Marine account, stored once on the
-machine with:
+Access needs the Copernicus Marine toolbox, version 2 (provided by the python3
+module of the ECMWF HPC; elsewhere pip install copernicusmarine, Python >=
+3.10), and a free Copernicus Marine account, stored once on the machine with:
     copernicusmarine login
 
 Environment
