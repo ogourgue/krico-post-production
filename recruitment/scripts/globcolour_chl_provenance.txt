@@ -1,0 +1,23 @@
+# Daily surface chlorophyll climatology for the chlorophyll indices of
+# the recruitment dataset
+#
+# product    : Global Ocean Colour (Copernicus-GlobColour),
+#              Bio-Geo-Chemical, L4, from Satellite Observations
+#              OCEANCOLOUR_GLO_BGC_L4_MY_009_104
+# doi        : 10.48670/moi-00281
+# dataset    : cmems_obs-oc_glo_bgc-plankton_my_l4-multi-climatology-4km_P1D
+# version    : 202311
+# toolbox    : copernicusmarine 2.4.1
+# variables  : CHL_mean, CHL_median, CHL_count
+# subset     : requested longitude -115.5 to 40.5, latitude -80.0
+#              to -39.5; day-of-year climatology of 366 days,
+#              carried on the calendar of 2008
+# grid       : 972 x 3744 cells, longitude -115.4792 to 40.4792, latitude -79.9792 to -39.5208
+# accessed   : 2026-11-24T15:26:22Z
+#
+# The file itself lives under $KRICO_GLOBCOLOUR and is not in the
+# repository. It is a subset written by the toolbox, so a second
+# download is not byte-identical; no checksum is given.
+#
+# days        bytes  file (relative to $KRICO_GLOBCOLOUR)
+ 366  13319418618  globcolour_chl_climatology.nc
