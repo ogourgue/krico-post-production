@@ -27,6 +27,7 @@ recruitment/
 │   ├── download_nsidc.py / .sh    # Daily NSIDC G02202 v6 files (Python + SLURM array)
 │   ├── nsidc_daily_provenance.txt # DOI, URL, access date, sha256 of every daily file
 │   ├── download_pisces.py / .sh   # Daily 3D chlorophyll of the PISCES hindcast (Copernicus Marine toolbox)
+│   ├── download_globcolour.py / .sh  # Daily chlorophyll climatology of GlobColour (Copernicus Marine toolbox)
 │   ├── preprocess_nsidc.py / .sh  # Daily files -> monthly stacks on the native grid
 │   ├── preprocess_glorys12_25km.py / .sh  # GLORYS12 ice binned onto the NSIDC grid
 │   ├── validate_nsidc.py          # NSIDC vs GLORYS12 ice readings on given cohorts
