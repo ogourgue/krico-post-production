@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=pisces_dl
 #SBATCH --qos=nf
-#SBATCH --time=06:00:00
+#SBATCH --time=01:00:00
 #SBATCH --mem=8G
 #SBATCH --array=0-32%6
 #SBATCH --output=logs/pisces_dl_%A_%a.out
@@ -48,4 +48,5 @@ SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 INDEX=${SLURM_ARRAY_TASK_ID:?run through sbatch, or call download_pisces.py YEAR directly}
 YEAR=$((1993 + INDEX))
 
-python3 "${SCRIPT_DIR}/download_pisces.py" "${YEAR}"
+# -u: unbuffered, so that the log follows the months as they complete.
+python3 -u "${SCRIPT_DIR}/download_pisces.py" "${YEAR}"

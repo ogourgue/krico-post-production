@@ -40,4 +40,5 @@ fi
 
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
-python3 "${SCRIPT_DIR}/download_globcolour.py"
+# -u: unbuffered, so that the log is written as the job runs.
+python3 -u "${SCRIPT_DIR}/download_globcolour.py"
