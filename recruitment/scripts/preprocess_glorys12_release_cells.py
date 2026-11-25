@@ -44,7 +44,7 @@ Output variables
 ----------------
     sea_ice_area_fraction(time, cell)   ileadfra, fraction 0-1
     temperature(time, depth, cell)      votemper, degrees Celsius
-    time(time)                          day of the daily mean, at 12:00, in the units of the source
+    time(time)                          day of the daily mean, at 12:00
     depth(depth), depth_bounds(depth_edge)   deptht, and depthw: level k lies
                                         between depth_bounds[k] and [k + 1]
     cell_y, cell_x, lon, lat, bathymetry, is_release_cell, n_release  (cell)
@@ -82,6 +82,9 @@ TEMP_VAR = "votemper"
 FILL = np.float32(netCDF4.default_fillvals["f4"])
 MISSING_ABOVE = 1e30       # the source marks land and sub-floor values so
 COMPLEVEL = 4
+TIME_UNITS = "hours since 1950-01-01 00:00:00"   # of the output time axis
+TIME_CALENDAR = "standard"
+DEPTH_TOLERANCE = 1e-3     # m, between the deptht of two files
 STAMP_TOLERANCE = timedelta(hours=1)   # of a daily mean around 12:00
 
 
@@ -104,16 +107,16 @@ def _months(days):
 
 def _records_by_day(nc, name):
     """
-    Records of a monthly file by day: ({date: record index}, units, calendar,
-    odd), one daily mean per day. The stamp is normally 12:00. A few records
+    Records of a monthly file by day: ({date: record index}, odd), one daily
+    mean per day. The time units are read from each file, since they are not
+    written the same way in all of them. The stamp is normally 12:00. A few records
     of the source are stamped some minutes away from it (11:52:30 on
     19 December 2018 in the sea-ice files); they are accepted within
     STAMP_TOLERANCE of noon and listed in odd as (date, stamp).
     """
     var = nc["time_counter"]
-    raw = np.asarray(var[:], dtype=np.float64)
-    calendar = getattr(var, "calendar", "standard")
-    stamps = netCDF4.num2date(raw, var.units, calendar=calendar,
+    stamps = netCDF4.num2date(_raw(var), var.units,
+                              calendar=getattr(var, "calendar", "standard"),
                               only_use_cftime_datetimes=False,
                               only_use_python_datetimes=True)
     records, odd = {}, []
@@ -127,7 +130,7 @@ def _records_by_day(nc, name):
         if stamp.date() in records:
             sys.exit(f"ERROR: {name}: two records for {stamp.date()}")
         records[stamp.date()] = k
-    return records, var.units, calendar, odd
+    return records, odd
 
 
 def _summarise_stamps(odd):
@@ -159,6 +162,39 @@ def _check_variable(var, name, dims, shape_tail):
                      f"{var.getncattr(attr)}); the extraction copies raw "
                      "values and cannot read them")
     var.set_auto_maskandscale(False)
+
+
+def _check_file(nc, path, kind, grid):
+    """
+    Everything the extraction requires of a monthly file (kind "ice" or
+    "temp"): the variable, the grid and, for temperature, the levels.
+    Returns its records by day and those not stamped at 12:00. Used by
+    --check on every file, and again by the extraction.
+    """
+    ny, nx = grid["bathymetry"].shape
+    if kind == "ice":
+        _check_variable(nc[ICE_VAR], path.name, ("time_counter", "y", "x"), (ny, nx))
+    else:
+        _check_variable(nc[TEMP_VAR], path.name,
+                        ("time_counter", "deptht", "y", "x"),
+                        (len(grid["deptht"]), ny, nx))
+        deptht = _raw(nc["deptht"])
+        if deptht.shape != grid["deptht"].shape or not np.allclose(
+                deptht, grid["deptht"], rtol=0, atol=DEPTH_TOLERANCE):
+            sys.exit(f"ERROR: {path.name}: deptht differs from "
+                     f"{grid['files']['temp']}")
+    difference = release_cells.coordinate_difference(
+        _raw(nc["nav_lon"]), _raw(nc["nav_lat"]), grid)
+    if not difference <= release_cells.COORDINATE_TOLERANCE:
+        sys.exit(f"ERROR: {path.name}: coordinates differ from "
+                 f"{grid['files']['ice']} by {difference:.2e} degrees")
+    return _records_by_day(nc, path.name)
+
+
+def _raw(var):
+    """Stored values of a coordinate variable, without masking."""
+    var.set_auto_maskandscale(False)
+    return np.asarray(var[:], dtype=np.float64)
 
 
 def _static(glorys_dir, table_path):
@@ -286,8 +322,9 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
         vtemp.units = "degC"
         vtemp.coordinates = "lon lat"
 
+        vtime.units = TIME_UNITS
+        vtime.calendar = TIME_CALENDAR
         k = 0
-        time_units = None
         for (yy, mm), month_days in _months(days):
             t0 = time.time()
             ice_path = glorys_dir / ICE_PATTERN.format(year=yy, month=mm)
@@ -297,35 +334,12 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
                     sys.exit(f"ERROR: {path} is missing")
             n_missing = np.zeros(2, dtype=np.int64)
             with netCDF4.Dataset(ice_path) as fi, netCDF4.Dataset(temp_path) as ft:
+                rec_i, odd_i = _check_file(fi, ice_path, "ice", grid)
+                rec_t, odd_t = _check_file(ft, temp_path, "temp", grid)
                 vi, vt = fi[ICE_VAR], ft[TEMP_VAR]
-                _check_variable(vi, ice_path.name, ("time_counter", "y", "x"), (ny, nx))
-                _check_variable(vt, temp_path.name,
-                                ("time_counter", "deptht", "y", "x"),
-                                (len(grid["deptht"]), ny, nx))
-                for nc, path in ((fi, ice_path), (ft, temp_path)):
-                    difference = release_cells.coordinate_difference(
-                        nc["nav_lon"][:], nc["nav_lat"][:], grid)
-                    if not difference <= release_cells.COORDINATE_TOLERANCE:
-                        sys.exit(f"ERROR: {path.name}: coordinates differ from "
-                                 f"{grid['files']['ice']} by {difference:.2e} degrees")
-                if not np.array_equal(np.asarray(ft["deptht"][:], dtype=np.float64),
-                                      grid["deptht"]):
-                    sys.exit(f"ERROR: {temp_path.name}: deptht differs from "
-                             f"{grid['files']['temp']}")
-                rec_i, units_i, cal_i, odd_i = _records_by_day(fi, ice_path.name)
-                rec_t, units_t, cal_t, odd_t = _records_by_day(ft, temp_path.name)
                 for label, odd in ((ICE_VAR, odd_i), (TEMP_VAR, odd_t)):
                     odd_stamps += [(label, stamp) for d, stamp in odd
                                    if d in month_days]
-                if (units_i, cal_i) != (units_t, cal_t):
-                    sys.exit(f"ERROR: {ice_path.name} and {temp_path.name} "
-                             "have different time units")
-                if time_units is None:
-                    time_units = (units_i, cal_i)
-                    vtime.units, vtime.calendar = time_units
-                elif time_units != (units_i, cal_i):
-                    sys.exit(f"ERROR: {ice_path.name}: time units "
-                             f"{units_i!r} differ from the previous months")
                 for d in month_days:
                     for rec, path in ((rec_i, ice_path), (rec_t, temp_path)):
                         if d not in rec:
@@ -337,7 +351,7 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
                     vice[k, :] = ice
                     vtemp[k, :, :] = temp
                     vtime[k] = netCDF4.date2num(datetime.combine(d, dtime(12)),
-                                                units_i, calendar=cal_i)
+                                                TIME_UNITS, calendar=TIME_CALENDAR)
                     k += 1
             sources += [ice_path.name, temp_path.name]
             n = len(month_days)
@@ -442,14 +456,8 @@ def check(glorys_dir, table_path, years):
                         seen[path] = None
                     else:
                         with netCDF4.Dataset(path) as nc:
-                            if pattern == ICE_PATTERN:
-                                _check_variable(nc[ICE_VAR], path.name,
-                                                ("time_counter", "y", "x"), (ny, nx))
-                            else:
-                                _check_variable(nc[TEMP_VAR], path.name,
-                                                ("time_counter", "deptht", "y", "x"),
-                                                (len(grid["deptht"]), ny, nx))
-                            records, _, _, odd = _records_by_day(nc, path.name)
+                            records, odd = _check_file(
+                                nc, path, "ice" if pattern == ICE_PATTERN else "temp", grid)
                             seen[path] = set(records)
                             odd_stamps += [(ICE_VAR if pattern == ICE_PATTERN else TEMP_VAR,
                                             stamp) for _, stamp in odd]
@@ -465,8 +473,9 @@ def check(glorys_dir, table_path, years):
     if problems:
         print("\n".join(f"  {p}" for p in sorted(set(problems))))
         sys.exit(f"ERROR: {len(set(problems))} problem(s) in the monthly files")
-    print(f"  {len(seen)} files present and readable as raw values, every "
-          f"day of the {len(years)} period(s) found ({n_days} days)")
+    print(f"  {len(seen)} files present, on the same grid and levels, "
+          f"readable as raw values; every day of the {len(years)} period(s) "
+          f"found ({n_days} days)")
     print(f"  records not stamped at 12:00: {len(odd_stamps)}")
     for line in _summarise_stamps(odd_stamps):
         print(f"    {line}")
