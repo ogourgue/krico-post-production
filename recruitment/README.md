@@ -164,9 +164,9 @@ The rules that act before release, in the 24 days that are not simulated, depend
 ```bash
 cd scripts && mkdir -p logs
 python3 preprocess_glorys12_release_cells.py --check             # inputs of the 32 years, no output
-sbatch validate_glorys12_release_cells.sh --releases ../data     # acceptance test 1, coverage
+sbatch validate_glorys12_release_cells.sh coverage ../data       # acceptance test 1, coverage
 sbatch --array=1 preprocess_glorys12_release_cells.sh            # spawning year 1994, as a test
-sbatch validate_glorys12_release_cells.sh \
+sbatch validate_glorys12_release_cells.sh day0 \
     $KRICO_RUNS/KRICO_0001/1993_11_15.nc \
     $KRICO_RUNS/KRICO_0003/1994_01_15.nc \
     $KRICO_RUNS/KRICO_0004/1994_03_14.nc                         # acceptance test 2, day 0
