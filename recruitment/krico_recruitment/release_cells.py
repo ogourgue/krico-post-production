@@ -135,8 +135,9 @@ def read_grid(glorys_dir):
     Returns a dict with:
       nav_lon, nav_lat   (ny, nx), as stored in the sea-ice files, the
                          coordinates M1 has read since v2.0.0
-      grid_lon, grid_lat their ascending 1-D axes (float64), exactly as M1
-                         derives them (sea_ice._grid_axes)
+      grid_lon, grid_lat their ascending 1-D axes, as M1 derives them
+                         (sea_ice._grid_axes), converted to float64; see
+                         _as_stored for the precision M1 works in
       bathymetry         (ny, nx) float32, hdept
       deptht             depth of the temperature levels (m)
       depthw             depth of the top of each level (m); the bottom of
@@ -253,13 +254,33 @@ def cell_lookup(cell_y, cell_x, shape):
     return lookup
 
 
+def _as_stored(axis):
+    """
+    A grid axis in the precision the forcing files store it with.
+
+    The release-cell files hold the axes as float64. The monthly files
+    hold nav_lon and nav_lat as float32, and M1 has computed the midpoints
+    between grid points in that precision since v2.0.0; midpoints computed
+    in float64 from the same values differ in the last bit, which moves a
+    particle within about a millionth of a degree of a midpoint to the
+    other cell (a few particles per cohort). An axis whose values are all
+    exact float32 numbers is therefore returned as float32, so that the
+    midpoints are those of v2.0.0.
+    """
+    axis = np.asarray(axis)
+    single = axis.astype(np.float32)
+    return single if np.array_equal(single.astype(np.float64), axis) else axis
+
+
 def locate_cells(lon, lat, grid_lon, grid_lat, lookup):
     """
     Index along the cell dimension of the grid point nearest to each
     position, -1 where that point is not an extracted cell. This is the
-    sampling rule of M1 (sea_ice._sample_nearest), applied to the lookup map.
+    sampling rule of M1 (sea_ice._sample_nearest), applied to the lookup
+    map, with the axes in the precision of the forcing files (_as_stored).
     """
-    return sea_ice._sample_nearest(lookup, grid_lon, grid_lat,
+    return sea_ice._sample_nearest(lookup, _as_stored(grid_lon),
+                                   _as_stored(grid_lat),
                                    np.asarray(lon, dtype=np.float64),
                                    np.asarray(lat, dtype=np.float64))
 

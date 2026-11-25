@@ -1,384 +1,247 @@
 """
-Process one release-day cohort: read trajectory NetCDF, evaluate all
-filters, determine per-particle outcomes, write per-particle recruitment
-NetCDF.
+Pass 1 of dataset v3.0.0: classify one release-day cohort.
+
+Reads one trajectory file and the release-cell file of its spawning year,
+computes the diagnostics of every particle, derives the outcome from them
+at the baseline parameters and writes one file per cohort.
 
 Usage
 -----
-    python process_cohort.py <input_trajectory.nc> <output_recruitment.nc> \
-        --glorys <GLORYS12 ice directory> [--offset 24]
-    python process_cohort.py <input_trajectory.nc> <output_recruitment.nc> \
-        --ice-source nsidc --nsidc <NSIDC ice directory> [--nsidc-nearest-ocean]
-    python process_cohort.py <input_trajectory.nc> <output_recruitment.nc> \
-        --ice-source glorys12_25km --nsidc <GLORYS12-on-25-km directory>
+    python3 process_cohort.py TRAJECTORY.nc OUTPUT.nc
+    python3 process_cohort.py TRAJECTORY.nc --check     # inputs only, no output
 
-The input file is one of the KRICO simulation outputs (e.g. 1993_11_15.nc).
-The output file contains one row per particle with the 9-column schema
-described in the Paper 1 methodology document.
+Input:   $KRICO_RUNS/KRICO_NNNN/YYYY_MM_DD.nc    one cohort, 201 daily values
+         $KRICO_GLORYS12_RELEASE_CELLS/glorys12_release_cells_YYYY.nc
+                                                 sea ice and temperature at the
+                                                 release cells (pass 0)
+Output:  the file named on the command line, e.g.
+         recruitment/data_v3.0_glorys12/YYYY_MM_DD.nc
 
-M1 is evaluated at spawning, which precedes release by --offset days. The
-sea-ice concentration at that moment is read from the GLORYS12 monthly ice
-files rather than from the trajectory, so --glorys is required.
+No GLORYS12 forcing file is read: what the rules need before release (M1
+at spawning, M3 during the descent and the ascent, the temperature at
+spawning) comes from the release-cell file, and the rest from the
+trajectory.
 
-With --ice-source nsidc, every sea-ice concentration the classification
-reads (M1 at spawning, and the along-trajectory series behind M4, the
-advance detection and censoring) comes from the NSIDC G02202 v6 record
-instead of GLORYS12, sampled at the same positions and days; the
-trajectories themselves are unchanged. This is the ice-source test for the
-ERA-Interim/ERA5 forcing change in GLORYS12 (see krico_recruitment.nsidc_ice).
-The default, --ice-source glorys12, reproduces the v2.0.0 classification.
---ice-source glorys12_25km reads GLORYS12 ice binned onto the NSIDC grid
-(preprocess_glorys12_25km.py) through the same sampler as nsidc, so that
-the difference between the two is the ice values alone; --nsidc then names
-that directory.
+Steps
+-----
+1. Inputs are checked (krico_recruitment.inputs.check_cohort, the function
+   check_inputs.py runs on every cohort beforehand) and every particle is
+   linked to its release cell, the grid point nearest to its release
+   position.
+2. Before release: sea ice at spawning, M3 temperatures, temperature at
+   spawning (krico_recruitment.pre_release).
+3. Along the trajectory: development, sea-ice runs, advance, positions
+   (krico_recruitment.classify.trajectory_diagnostics).
+4. The outcome is computed from the diagnostics in their stored form
+   (classify.outcome), so that any reader of the file recomputes it
+   exactly. The position, day and path length at which fate is recorded
+   follow from it, as in v2.0.0; a particle removed by M3 is recorded like
+   one removed by M1, at its release position on day 0.
+5. Day-0 check: the trajectory's own sea ice and temperature at day 0
+   against the release-cell file. The result is written in the global
+   attributes; it does not stop the run.
+
+The output records the commit that produced it: the script stops if
+tracked files are modified or if the commit is not pushed (--allow-dirty
+for tests).
+
+Environment
+-----------
+    KRICO_GLORYS12_RELEASE_CELLS   required
 """
 
 import argparse
+import os
+import resource
 import sys
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from netCDF4 import Dataset
 
 # Allow running the script directly from the `scripts/` folder: add the
 # parent directory (which contains the krico_recruitment package) to sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from krico_recruitment import development, filters, sea_ice, trajectory, io as krico_io
-from krico_recruitment import nsidc_ice
-from krico_recruitment.outcome import OUTCOME_CODES
+from krico_recruitment import (classify, inputs, pre_release, provenance,  # noqa: E402
+                               sea_ice, trajectory, io as krico_io)
+from krico_recruitment.outcome import OUTCOME_MEANINGS  # noqa: E402
+
+# Share of particles whose day-0 values must equal the release-cell file
+# exactly for the check to be reported as expected (sea ice from
+# 19 December 2018 is excepted: its records are stamped 11:52:30).
+DAY0_EXPECTED_SHARE = 0.999
 
 
-# Bathymetry threshold for the shelf / shelf-slope recruitment zone (meters).
-SHELF_DEPTH_THRESHOLD = 2000.0
-
-
-def process_cohort(input_path, output_path, glorys_dir,
-                   offset_days=sea_ice.SPAWNING_OFFSET_DAYS,
-                   ice_source="glorys12", nsidc_dir=None,
-                   nsidc_nearest_ocean=False):
+def classify_cohort(input_path, release_cells_dir,
+                    parameters=classify.BASELINE, log=print):
     """
-    Run the full pipeline on one cohort and write the output file.
+    Diagnostics and outcome of one cohort, in memory.
 
-    ice_source selects where sea-ice concentration is read from: "glorys12"
-    (M1 from the GLORYS12 monthly files in glorys_dir, the rest from the
-    trajectory's own sea_ice_area_fraction) or "nsidc" (everything from the
-    NSIDC monthly files in nsidc_dir, sampled at the trajectory positions).
+    Returns (particle_id, variables, info): the variables of a v3.0.0 file
+    as a dict of arrays, and info with release_day, static, n_obs and the
+    day-0 check. parameters other than the baseline are for tests (the
+    regression against v2.0.0 switches M3 off); a file is only ever
+    written at the baseline.
     """
-    if ice_source not in ("glorys12", *nsidc_ice.SOURCES):
-        raise ValueError(f"unknown ice_source {ice_source!r}")
-    if ice_source in nsidc_ice.SOURCES and nsidc_dir is None:
-        raise ValueError(f"ice_source={ice_source!r} requires nsidc_dir")
-    gridded = nsidc_ice.SOURCES.get(ice_source)
-    if ice_source == "glorys12" and glorys_dir is None:
-        raise ValueError("ice_source='glorys12' requires glorys_dir")
-    print(f"Reading trajectory file: {input_path}")
+    log(f"Checking inputs of {input_path}")
+    checked = inputs.check_cohort(input_path, release_cells_dir)
+    day, static, cell = checked["release_day"], checked["static"], checked["cell"]
+    release_date = pd.Timestamp(datetime.combine(day, datetime.min.time())
+                                + timedelta(hours=12))
+    log(f"  release {day}, {checked['n_particles']} particles, "
+        f"{checked['n_obs']} daily values; release cells from "
+        f"{static['path'].name} ({static['code_version']})")
+
+    log("Before release: sea ice at spawning, M3 temperatures...")
+    d = classify.pre_release_diagnostics(
+        pre_release.evaluate(static, day, cell), cell)
+
+    log("Reading trajectories...")
     ds = krico_io.read_trajectory_file(input_path)
-
-    n_particles = ds.sizes["trajectory"]
-    n_obs = ds.sizes["obs"]
-    print(f"  particles: {n_particles}, obs per particle: {n_obs}")
-
-    # Extract arrays. Shape (n_particles, n_obs).
     lon = ds["lon"].values
     lat = ds["lat"].values
     depth = ds["z"].values
     temperature = ds["temperature"].values
     bathymetry = ds["bathymetry"].values
-    time_ns = ds["time"].values  # nanoseconds since 1970-01-01
-
-    # Release date from day 0 time of particle 0.
-    # (All particles in a cohort share the release date by design.)
-    release_date = pd.Timestamp(time_ns[0, 0])
-    print(f"  release date: {release_date.date()}")
-
-    # Along-trajectory sea-ice concentration, (n_particles, n_obs). From the
-    # trajectory file (GLORYS12, interpolated by Parcels at run time) or
-    # re-sampled from the NSIDC record at the stored positions and days.
-    if gridded:
-        print(f"Sampling {gridded['id']} along trajectories from {nsidc_dir}"
-              + (" (nearest ocean cell for coast/land)" if nsidc_nearest_ocean else ""))
-        sic = nsidc_ice.along_trajectory_sic(lon, lat, release_date, nsidc_dir,
-                                             nearest_ocean=nsidc_nearest_ocean,
-                                             pattern=gridded["pattern"])
-    else:
-        sic = ds["sea_ice_area_fraction"].values
-
-    # ------------------------------------------------------------------
-    # Identify last valid day per particle (handles Parcels deletion and
-    # any sporadic NaN positions from field interpolation issues).
-    # ------------------------------------------------------------------
-    print("Computing last valid day per particle...")
-    last_valid = trajectory.last_valid_day(lon, lat, depth)
-
-    # "Alive at end of tracking" — tolerant to a single NaN day at the
-    # very end caused by Parcels time-interpolation precision artifacts.
-    # See sea_ice.END_OF_TRACKING_TOLERANCE.
-    alive_at_end = last_valid >= n_obs - 1 - sea_ice.END_OF_TRACKING_TOLERANCE
-
-    # ------------------------------------------------------------------
-    # Step 2: T-dependent development
-    # ------------------------------------------------------------------
-    print("Integrating T-dependent development...")
-    cumulative_dev = development.integrate_development(temperature)
-    calyptopis_end_day = development.calyptopis_window_end(cumulative_dev)
-    fiv_day = development.days_to_reach_stage(
-        cumulative_dev, development.FIV_INDEX
-    )
-
-    # ------------------------------------------------------------------
-    # Step 3: M1 (spawning SIC >= 80%)
-    #
-    # Evaluated at the spawning date, which precedes release by the
-    # descent-ascent interval. The concentration is sampled from the
-    # GLORYS12 field at the release position, not from the trajectory.
-    # ------------------------------------------------------------------
-    spawning_date = release_date.normalize() - pd.Timedelta(days=offset_days)
-    print(f"Evaluating M1 at spawning ({spawning_date.date()}, "
-          f"{offset_days} days before release)...")
-    if gridded:
-        sic_at_spawning = nsidc_ice.spawning_sic(
-            lon[:, 0], lat[:, 0], release_date, nsidc_dir, offset_days,
-            nearest_ocean=nsidc_nearest_ocean, pattern=gridded["pattern"]
-        )
-    else:
-        sic_at_spawning = sea_ice.spawning_sic(
-            lon[:, 0], lat[:, 0], release_date, glorys_dir, offset_days
-        )
-    killed_M1 = filters.evaluate_M1(sic_at_spawning)
-
-    # ------------------------------------------------------------------
-    # Step 4: M4 (calyptopis starvation)
-    # ------------------------------------------------------------------
-    print("Evaluating M4...")
-    killed_M4, M4_kill_day = filters.evaluate_M4(sic, calyptopis_end_day)
-    # A particle killed by M1 cannot subsequently be killed by M4.
-    killed_M4 = killed_M4 & ~killed_M1
-
-    # ------------------------------------------------------------------
-    # Step 5: sea-ice advance detection
-    # ------------------------------------------------------------------
-    print("Detecting sea-ice advance...")
-    april1_day = sea_ice.find_april1_day_index(release_date, n_obs)
-    print(f"  April 1 day index: {april1_day}")
-    advance_day = sea_ice.detect_sea_ice_advance(sic, april1_day)
-
-    # Censoring: no advance but SIC rising at end of tracking.
-    censored = sea_ice.check_censoring(sic, n_obs, advance_day, last_valid)
-    # Censoring does not apply to particles already killed by M1 or M4.
-    censored = censored & ~killed_M1 & ~killed_M4
-
-    # ------------------------------------------------------------------
-    # Step 6: evaluate M5 / M6 at the advance event (for still-live particles)
-    # ------------------------------------------------------------------
-    print("Evaluating M5 / M6 at advance event...")
-
-    # Candidates: alive after M1 and M4.
-    alive = ~killed_M1 & ~killed_M4
-
-    # An advance event that occurs after the particle was deleted from the
-    # simulation does not count — the particle never actually experienced it.
-    # Re-classify such cases by marking the advance as not-detected.
-    deleted_before_advance = (advance_day != -1) & (advance_day > last_valid)
-    advance_day = np.where(deleted_before_advance, -1, advance_day)
-
-    # Particles with no advance detected and not censored.
-    # We further split this into:
-    #   - exited_domain: particle was deleted before reaching end of tracking
-    #   - killed_M6_no_advance: particle reached end of tracking but ice never came
-    no_advance_alive = alive & (advance_day == -1) & ~censored & alive_at_end
-    exited = alive & (advance_day == -1) & ~censored & ~alive_at_end
-
-    # For particles with an advance event, check M5 conditions at that day.
-    has_advance = alive & (advance_day != -1)
-
-    # Reached FIV and on shelf at advance event.
-    # "On shelf" means water depth (bathymetry) < 2000 m, i.e. the particle
-    # is over the continental shelf or shelf-slope. The particle's own
-    # z-coordinate is always shallow (upper 200 m).
-    dev_at_advance = trajectory.extract_at_day(cumulative_dev, advance_day)
-    bathy_at_advance = trajectory.extract_at_day(bathymetry, advance_day)
-
-    reached_FIV_at_advance = dev_at_advance >= development.FIV_INDEX
-    on_shelf_at_advance = bathy_at_advance < SHELF_DEPTH_THRESHOLD
-
-    killed_M5_no_FIV = has_advance & ~reached_FIV_at_advance
-    killed_M5_not_on_shelf = (
-        has_advance & reached_FIV_at_advance & ~on_shelf_at_advance
-    )
-    success = has_advance & reached_FIV_at_advance & on_shelf_at_advance
-
-    # Censored is also restricted to particles still alive at end of tracking.
-    # (check_censoring already enforces this through alive_at_end, but
-    # double-check for safety.)
-    censored = censored & alive_at_end
-
-    # ------------------------------------------------------------------
-    # Step 7: assemble outcome, final position, travel time, path length
-    # ------------------------------------------------------------------
-    print("Assembling outcomes...")
-
-    # "Moment fate is determined" day index per particle.
-    # Default to -1, then fill in per outcome.
-    fate_day = np.full(n_particles, -1, dtype=np.int64)
-
-    # killed_M1: day 0 (release). The constraint acts at spawning, which is
-    # not simulated, so the release position and day 0 remain the recorded
-    # fate — the particle never enters the water column.
-    fate_day[killed_M1] = 0
-
-    # killed_M4: day threshold was crossed.
-    fate_day[killed_M4] = M4_kill_day[killed_M4]
-
-    # success, killed_M5_no_FIV, killed_M5_not_on_shelf: advance day.
-    advance_mask = success | killed_M5_no_FIV | killed_M5_not_on_shelf
-    fate_day[advance_mask] = advance_day[advance_mask]
-
-    # censored and killed_M6_no_advance: last valid day. For "clean"
-    # particles this is n_obs - 1; for particles with a single Parcels
-    # precision-NaN at the very last day this is n_obs - 2, and we record
-    # position from that day rather than the NaN-bearing final day.
-    end_mask = censored | no_advance_alive
-    fate_day[end_mask] = last_valid[end_mask]
-
-    # exited_domain: last valid day (when particle was deleted).
-    fate_day[exited] = last_valid[exited]
-
-    # Outcome code.
-    outcome_code = np.full(n_particles, -1, dtype=np.int8)
-    outcome_code[success] = OUTCOME_CODES["success"]
-    outcome_code[censored] = OUTCOME_CODES["censored"]
-    outcome_code[killed_M1] = OUTCOME_CODES["killed_M1"]
-    outcome_code[killed_M4] = OUTCOME_CODES["killed_M4"]
-    outcome_code[killed_M5_no_FIV] = OUTCOME_CODES["killed_M5_no_FIV"]
-    outcome_code[killed_M5_not_on_shelf] = OUTCOME_CODES["killed_M5_not_on_shelf"]
-    outcome_code[no_advance_alive] = OUTCOME_CODES["killed_M6_no_advance"]
-    outcome_code[exited] = OUTCOME_CODES["exited_domain"]
-
-    # Sanity check: every particle should have a single outcome.
-    assigned = (outcome_code >= 0)
-    if not assigned.all():
-        n_unassigned = (~assigned).sum()
-        raise RuntimeError(
-            f"{n_unassigned} particles not assigned to any outcome. Bug in logic."
-        )
-
-    # Final positions at fate_day.
-    # For particles with fate_day valid, pick position at that day.
-    release_lon_arr = lon[:, 0]
-    release_lat_arr = lat[:, 0]
-    release_depth_arr = depth[:, 0]
-
-    final_lon_arr = trajectory.extract_at_day(lon, fate_day)
-    final_lat_arr = trajectory.extract_at_day(lat, fate_day)
-    final_depth_arr = trajectory.extract_at_day(depth, fate_day)
-
-    # Travel time = fate_day in days (daily output → day index == days).
-    travel_time_arr = fate_day.astype(np.int32)
-    # For killed_M1, fate_day == 0, travel_time == 0. Consistent with spec.
-
-    # Trajectory path length up to fate_day.
-    print("Computing trajectory path length...")
-    cum_path = trajectory.cumulative_path_length_m(lon, lat)
-    path_length_arr = trajectory.extract_at_day(cum_path, fate_day)
-
-    # Particle IDs from the trajectory coord (if present) or 0..n-1.
+    sic = ds["sea_ice_area_fraction"].values
     if "trajectory" in ds.coords:
         particle_id = ds["trajectory"].values.astype(np.int64)
     else:
-        particle_id = np.arange(n_particles, dtype=np.int64)
+        particle_id = np.arange(lon.shape[0], dtype=np.int64)
+    ds.close()
 
-    # ------------------------------------------------------------------
-    # Step 8: write output file
-    # ------------------------------------------------------------------
-    print(f"Writing output: {output_path}")
-    krico_io.write_recruitment_file(
-        path=output_path,
-        particle_id=particle_id,
-        release_lon=release_lon_arr,
-        release_lat=release_lat_arr,
-        release_depth=release_depth_arr,
-        outcome=outcome_code,
-        final_lon=final_lon_arr,
-        final_lat=final_lat_arr,
-        final_depth=final_depth_arr,
-        travel_time=travel_time_arr,
-        trajectory_path_length=path_length_arr,
-        release_date=release_date,
-    )
+    day0 = pre_release.day0_check(static, day, cell, depth[:, 0], sic[:, 0],
+                                  temperature[:, 0])
 
-    # Record the M1 evaluation provenance on the output file, so that any
-    # dataset can report which offset produced it. Written here rather than
-    # through write_recruitment_file to keep that function's signature
-    # unchanged; move it there if more provenance attributes accumulate.
-    with Dataset(output_path, "a") as nc:
-        nc.m1_spawning_offset_days = int(offset_days)
-        nc.m1_spawning_date = str(spawning_date.date())
-        if gridded:
-            nc.sic_source = gridded["id"]
-            nc.m1_sic_source = str(nsidc_dir)
-            nc.trajectory_sic_source = str(nsidc_dir)
-            nc.nsidc_nearest_ocean = int(bool(nsidc_nearest_ocean))
-        else:
-            nc.sic_source = "GLORYS12"
-            nc.m1_sic_source = str(glorys_dir)
-            nc.trajectory_sic_source = "trajectory file (Parcels-sampled GLORYS12)"
+    log("Along the trajectory: development, sea-ice runs, advance...")
+    diagnostics, last_valid = classify.trajectory_diagnostics(
+        lon, lat, depth, temperature, bathymetry, sic, release_date)
+    d.update(diagnostics)
+    del temperature, bathymetry, sic
 
-    # Quick summary to stdout for validation.
+    log("Outcome from the diagnostics...")
+    code = classify.outcome(d, parameters)
+    fate = classify.fate_day(d, code, last_valid)
+
+    variables = {
+        "release_lon": lon[:, 0].astype(np.float32),
+        "release_lat": lat[:, 0].astype(np.float32),
+        "release_depth": depth[:, 0].astype(np.float32),
+        "outcome": code,
+        "final_lon": trajectory.extract_at_day(lon, fate).astype(np.float32),
+        "final_lat": trajectory.extract_at_day(lat, fate).astype(np.float32),
+        "final_depth": trajectory.extract_at_day(depth, fate).astype(np.float32),
+        "travel_time": fate.astype(np.int32),
+    }
+    del depth
+    cum_path = trajectory.cumulative_path_length_m(lon, lat)
+    variables["trajectory_path_length"] = trajectory.extract_at_day(
+        cum_path, fate).astype(np.float32)
+    del cum_path, lon, lat
+    variables.update(d)
+
+    info = {"release_day": day, "release_date": release_date, "static": static,
+            "n_obs": checked["n_obs"], "day0": day0}
+    return particle_id, variables, info
+
+
+def summary(variables, info, log=print):
+    """Outcome shares and day-0 check, for the log."""
+    code = variables["outcome"]
+    n = code.size
+    log("Outcome summary:")
+    for value, label in enumerate(OUTCOME_MEANINGS):
+        count = int((code == value).sum())
+        log(f"  {value} {label:26s} {count:8d}  ({100.0 * count / n:5.2f}%)")
+    log("Day-0 check, trajectory against the release-cell file:")
+    for name, s in info["day0"].items():
+        note = ""
+        if not s["exact_share"] >= DAY0_EXPECTED_SHARE:
+            note = (f"   WARNING: below {100 * DAY0_EXPECTED_SHARE}% (expected "
+                    "for sea ice from 19 December 2018 only)")
+        log(f"  {name:12s} {100 * s['exact_share']:8.4f}% exactly equal, "
+            f"largest difference {s['max_abs_difference']:.3e}, "
+            f"{s['compared']} particles compared{note}")
+
+
+def process_cohort(input_path, output_path, release_cells_dir,
+                   allow_dirty=False):
+    """Classify one cohort and write its v3.0.0 file."""
+    started = time.time()
+    input_path, output_path = Path(input_path), Path(output_path)
+    if not output_path.parent.is_dir():
+        raise FileNotFoundError(f"output folder {output_path.parent} does not "
+                                "exist; create it first")
+    identity = provenance.code_identity(script=__file__, allow_dirty=allow_dirty)
+    print(f"Code: {identity['code_version']} ({identity['code_commit'][:7]})")
+
+    particle_id, variables, info = classify_cohort(input_path, release_cells_dir)
+    static, day = info["static"], info["release_day"]
+
+    attributes = {
+        "release_date": str(info["release_date"]),
+        "source": "krico_recruitment post-processing pipeline",
+        "dataset_version": krico_io.DATASET_VERSION,
+        **identity,
+        "history": provenance.history_line(
+            f"process_cohort.py {input_path.name} {output_path.name}"),
+        "trajectory_source": f"{input_path.parent.name}/{input_path.name}",
+        "release_cells_source": (f"{static['path'].name} "
+                                 f"({static['code_version']}, "
+                                 f"{static['code_commit'][:7]})"),
+        "m1_spawning_offset_days": np.int64(sea_ice.SPAWNING_OFFSET_DAYS),
+        "m1_spawning_date": str(day - timedelta(days=sea_ice.SPAWNING_OFFSET_DAYS)),
+        "sic_source": "GLORYS12",
+    }
+    for name, s in info["day0"].items():
+        attributes[f"day0_{name}_exact_share"] = np.float64(s["exact_share"])
+        attributes[f"day0_{name}_max_abs_difference"] = np.float64(s["max_abs_difference"])
+        attributes[f"day0_{name}_particles_compared"] = np.int64(s["compared"])
+    attributes["day0_comment"] = (
+        "sea ice and temperature of the trajectory at day 0 against the "
+        "release-cell file on the release day, at the release cell and at "
+        "the level holding the release depth: share of particles exactly "
+        "equal and largest absolute difference")
+
+    print(f"Writing {output_path}")
+    krico_io.write_classification_file(output_path, particle_id, variables,
+                                       info["n_obs"], attributes)
     print()
-    print("Outcome summary:")
-    unique, counts = np.unique(outcome_code, return_counts=True)
-    for code, count in zip(unique, counts):
-        label = list(OUTCOME_CODES.keys())[list(OUTCOME_CODES.values()).index(code)]
-        pct = 100.0 * count / n_particles
-        print(f"  {label:28s} {count:8d}  ({pct:5.2f}%)")
+    summary(variables, info)
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1e6   # kB on Linux
+    print(f"Done: {output_path.name}, {output_path.stat().st_size / 1e6:.1f} MB, "
+          f"{time.time() - started:.0f} s, peak memory {peak:.1f} GB")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Process one KRICO cohort into a per-particle recruitment file."
-    )
-    parser.add_argument("input", type=str, help="Input trajectory NetCDF (e.g. 1993_11_15.nc)")
-    parser.add_argument("output", type=str, help="Output recruitment NetCDF")
-    parser.add_argument(
-        "--glorys", type=str, default=None,
-        help="Directory holding glorys12_ice_YYYY_MM.nc, used to evaluate M1 "
-             "at the spawning date (required with --ice-source glorys12)",
-    )
-    parser.add_argument(
-        "--ice-source", choices=("glorys12", *nsidc_ice.SOURCES), default="glorys12",
-        help="Where sea-ice concentration is read from (default glorys12). "
-             "nsidc: M1 and the along-trajectory series from the NSIDC "
-             "G02202 v6 monthly files, sampled at the trajectory positions; "
-             "glorys12_25km: the same sampler on GLORYS12 ice binned onto the "
-             "NSIDC grid (preprocess_glorys12_25km.py)",
-    )
-    parser.add_argument(
-        "--nsidc", type=str, default=None,
-        help="Directory holding the monthly stacks and ancillary/ "
-             "(required with --ice-source nsidc or glorys12_25km)",
-    )
-    parser.add_argument(
-        "--nsidc-nearest-ocean", action="store_true",
-        help="With --ice-source nsidc: read coast/land cells from the nearest "
-             "ocean cell instead of NaN",
-    )
-    parser.add_argument(
-        "--offset", type=int, default=sea_ice.SPAWNING_OFFSET_DAYS,
-        help=f"Days from spawning to calyptopis I "
-             f"(default {sea_ice.SPAWNING_OFFSET_DAYS}; Thorpe et al. 2019 "
-             f"give 23-26)",
-    )
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("input", type=Path,
+                        help="trajectory file, YYYY_MM_DD.nc")
+    parser.add_argument("output", type=Path, nargs="?",
+                        help="classification file to write")
+    parser.add_argument("--check", action="store_true",
+                        help="check the inputs of this cohort and write nothing")
+    parser.add_argument("--allow-dirty", action="store_true",
+                        help="for tests: accept modified or unpushed code")
     args = parser.parse_args()
-    if args.ice_source == "glorys12" and args.glorys is None:
-        parser.error("--glorys is required with --ice-source glorys12")
-    if args.ice_source in nsidc_ice.SOURCES and args.nsidc is None:
-        parser.error(f"--nsidc is required with --ice-source {args.ice_source}")
-
-    process_cohort(args.input, args.output, args.glorys, args.offset,
-                   ice_source=args.ice_source, nsidc_dir=args.nsidc,
-                   nsidc_nearest_ocean=args.nsidc_nearest_ocean)
+    directory = os.environ.get("KRICO_GLORYS12_RELEASE_CELLS")
+    if not directory:
+        sys.exit("ERROR: KRICO_GLORYS12_RELEASE_CELLS environment variable not set.")
+    try:
+        if args.check:
+            checked = inputs.check_cohort(args.input, directory)
+            print(f"{args.input.name}: inputs accepted, "
+                  f"{checked['n_particles']} particles")
+            return
+        if args.output is None:
+            parser.error("give the output file, or --check")
+        process_cohort(args.input, args.output, directory,
+                       allow_dirty=args.allow_dirty)
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        sys.exit(f"ERROR: {exc}")
 
 
 if __name__ == "__main__":

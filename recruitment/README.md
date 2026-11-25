@@ -2,7 +2,9 @@
 
 Per-particle recruitment post-processing for the KRICO Lagrangian trajectory dataset.
 
-Reads one Parcels trajectory NetCDF per release-day cohort and produces a per-particle recruitment outcome NetCDF following the Thorpe et al. (2019) framework, classifying each particle into one of eight mutually exclusive outcome states.
+Reads one Parcels trajectory NetCDF per release-day cohort and produces a per-particle NetCDF following the Thorpe et al. (2019) framework: the outcome of each particle, one of nine mutually exclusive states, and the diagnostics the outcome is derived from.
+
+> **State of this branch.** The code is that of dataset **v3.0.0**, in production: [pass 0](#release-cell-extraction-glorys12-sea-ice-and-temperature) (inputs at the release cells) and [pass 1](#dataset-v300-pass-1) (the classification) are written; pass 2 (chlorophyll) is not. The published dataset is still v2.0.0, which the tag `v2.0.1` produces; sections that describe it say so.
 
 ## Layout
 
@@ -11,21 +13,26 @@ recruitment/
 ├── README.md
 ├── krico_recruitment/             # Python package
 │   ├── __init__.py
-│   ├── outcome.py                 # 8-state outcome codes (CF flag)
-│   ├── development.py             # T-dependent development (Thorpe Eq. 2, Table 1)
-│   ├── filters.py                 # M1 and M4 evaluation
+│   ├── outcome.py                 # 9-state outcome codes (CF flag), v2.0.0 correspondence
+│   ├── development.py             # T-dependent development (Thorpe Eq. 2, Table 1), rate change
+│   ├── filters.py                 # M1, M3 and M4 thresholds, runs under sea ice
+│   ├── pre_release.py             # Before release: sea ice at spawning, M3 temperatures, from the release cells
+│   ├── classify.py                # Diagnostics along the trajectory, outcome from the diagnostics
+│   ├── inputs.py                  # Checks of the inputs of one cohort
 │   ├── sea_ice.py                 # Sea-ice at spawning, advance detection, censoring
 │   ├── trajectory.py              # Path length, pick-at-day utilities
-│   ├── io.py                      # NetCDF read / write
+│   ├── io.py                      # NetCDF read / write, schema of the v3.0.0 files
 │   ├── nsidc_grid.py              # NSIDC 25 km polar-stereographic grid geometry
 │   ├── nsidc_ice.py               # NSIDC sea ice at spawning and along trajectories
 │   ├── release_cells.py           # Release cells on the GLORYS12 grid, particle-to-cell link
 │   └── provenance.py              # Commit and version written into the output files
 ├── scripts/
-│   ├── process_cohort.py          # Single-cohort orchestration script
+│   ├── process_cohort.py          # Pass 1: classification of one cohort
 │   ├── run_year.sh                # SLURM array driver (1 task per spawning year)
-│   ├── run_year_nsidc.sh          # Same, with NSIDC sea ice (see Ice-source test)
-│   ├── run_year_glorys12_25km.sh  # Same, with GLORYS12 ice on the NSIDC grid
+│   ├── check_inputs.py / .sh      # Inputs of pass 1, checked for every cohort before submission
+│   ├── validate_pass1.py / .sh    # Regression against v2.0.0, report on written files
+│   ├── run_year_nsidc.sh          # v2 only, not ported: NSIDC sea ice (see Ice-source test)
+│   ├── run_year_glorys12_25km.sh  # v2 only, not ported: GLORYS12 ice on the NSIDC grid
 │   ├── download_nsidc.py / .sh    # Daily NSIDC G02202 v6 files (Python + SLURM array)
 │   ├── nsidc_daily_provenance.txt # DOI, URL, access date, sha256 of every daily file
 │   ├── download_pisces.py / .sh   # Daily 3D chlorophyll of the PISCES hindcast (Copernicus Marine toolbox)
@@ -42,7 +49,8 @@ recruitment/
 │   ├── archive_by_year.sh         # Group cohort files into spawning-year tar.gz archives
 │   ├── extract_archives.sh        # Extract spawning-year archives back into individual files
 │   └── download_from_zenodo.py    # Download archives from Zenodo
-├── data/                          # Recruitment outputs (gitignored)
+├── data/                          # Recruitment outputs, v2.0.0 (gitignored)
+├── data_v3.0_glorys12/            # Pass 1 outputs, v3.0.0 (gitignored)
 ├── data_nsidc/                    # Recruitment outputs with NSIDC sea ice (gitignored)
 ├── data_glorys12_25km/            # Same, with GLORYS12 ice on the NSIDC grid (gitignored)
 └── archives/                      # Spawning-year tar.gz archives (gitignored)
@@ -54,41 +62,32 @@ There are two ways to obtain the recruitment data:
 
 ### Path A — Full pipeline from raw trajectories
 
-For users with access to the raw KRICO simulation outputs. Reproduces the recruitment classification from scratch.
+For users with access to the raw KRICO simulation outputs. Reproduces the classification of v3.0.0 from scratch.
 
 **Prerequisites:**
 - HPC environment (SLURM cluster with Python 3.13.13)
-- `KRICO_RUNS` environment variable set to the directory containing raw trajectory simulations (see main [README](../README.md))
-- `KRICO_GLORYS12` environment variable set to the GLORYS12 preprocessing output directory containing the monthly sea-ice files (`glorys12_ice_YYYY_MM.nc`). Required because M1 is evaluated at the spawning date, which precedes the trajectory — see [M1 at spawning](#m1-at-spawning) below.
+- `KRICO_RUNS` set to the directory containing raw trajectory simulations (see main [README](../README.md))
+- `KRICO_GLORYS12_RELEASE_CELLS` set to the directory of the release-cell files, `glorys12_release_cells_YYYY.nc`. These hold the GLORYS12 sea ice and temperature at the release cells and are produced by pass 0 from the GLORYS12 forcing (`KRICO_GLORYS12`), see [Release-cell extraction](#release-cell-extraction-glorys12-sea-ice-and-temperature). Pass 1 itself reads no forcing file.
 
-  These files must start at **October 1993**, one month earlier than the trajectories. The first cohort is released on 15 November 1993 and M1 reads back 24 days from there, to 22 October 1993, so `glorys12_ice_1993_10.nc` is required even though no particle is tracked in that month.
-
-**Workflow:**
-1. Submit the SLURM array job (one task per spawning year, 32 tasks total):
-   ```bash
-   cd recruitment/scripts
-   sbatch run_year.sh
-   ```
-   Or for a subset:
-   ```bash
-   sbatch --array=1 run_year.sh         # First spawning year only (1994)
-   sbatch --array=1-5 run_year.sh       # First five spawning years (1994-1998)
-   ```
-2. Outputs go to `recruitment/data/` (one NetCDF per cohort, ~3,848 files for the full hindcast).
-
-Cohorts whose output already exists are skipped, so re-runs are idempotent. This also means the job does nothing against a populated output directory: when the classification itself changes, move the previous `recruitment/data/` aside first.
-
-For testing on a single cohort:
+**Workflow** (from `recruitment/scripts`; details in [Dataset v3.0.0: pass 1](#dataset-v300-pass-1)):
 ```bash
-python scripts/process_cohort.py \
+mkdir -p logs ../data_v3.0_glorys12
+sbatch check_inputs.sh                               # every cohort through the checks of the job
+sbatch --array=1 run_year.sh data_v3.0_glorys12      # first spawning year (1994)
+sbatch --array=2-32 run_year.sh data_v3.0_glorys12   # the rest
+```
+Outputs go to the folder named on the command line (one NetCDF per cohort, 3,848 files for the full hindcast). There is no default folder. Cohorts whose output already exists are skipped, so a failed task is simply resubmitted.
+
+To classify a single cohort:
+```bash
+python3 scripts/process_cohort.py \
     $KRICO_RUNS/KRICO_0001/1993_11_15.nc \
-    data/1993_11_15.nc \
-    --glorys $KRICO_GLORYS12
+    data_v3.0_glorys12/1993_11_15.nc
 ```
 
 ### Path B — Pre-processed data from Zenodo
 
-For users who want to analyze the recruitment outcomes without re-running the pipeline.
+For users who want to analyze the recruitment outcomes without re-running the pipeline. This path still serves **v2.0.0**, the published dataset; v3.0.0 is not on Zenodo yet.
 
 **Prerequisites:**
 - Local machine (no HPC needed)
@@ -114,7 +113,9 @@ After extraction, `recruitment/data/` contains 3,848 NetCDF files (one per relea
 | v1.0.0 | Release date, from the trajectory at day 0 | [10.5281/zenodo.20101159](https://doi.org/10.5281/zenodo.20101159) |
 | **v2.0.0** | Spawning date, 24 days earlier, from the GLORYS12 field | [**10.5281/zenodo.22548763**](https://doi.org/10.5281/zenodo.22548763) |
 
-v2.0.0 is what the current code produces and what Path B downloads by default, so the two paths agree. v1.0.0 remains available for anyone who needs the release-date classification; pass `--doi` to `download_from_zenodo.py` to retrieve it.
+| v3.0.0 (in production) | As v2.0.0; adds M3, recruitment in two classes, the diagnostics | not yet published |
+
+v2.0.0 is what the tag `v2.0.1` produces and what Path B downloads by default. The code of this branch produces v3.0.0, whose outcome codes differ (see [Dataset v3.0.0: pass 1](#dataset-v300-pass-1)). v1.0.0 remains available for anyone who needs the release-date classification; pass `--doi` to `download_from_zenodo.py` to retrieve it.
 
 The two are not interchangeable. Evaluating M1 at release rather than at spawning underestimates early-season spawning suppression: M1 is 5.19 percentage points lower under v1.0.0, and every outcome downstream of it shifts accordingly. Files from the two versions must not be combined in a single analysis.
 
@@ -180,6 +181,87 @@ Both tests passed on 25 November 2026. Coverage, over the 2,100,265,336 release 
 
 Every file records the commit that produced it (`code_commit`, `code_version`); the extraction stops if the code is modified, untracked or not pushed.
 
+## Dataset v3.0.0: pass 1
+
+Pass 1 (`process_cohort.py`) reads one trajectory file and the release-cell file of its spawning year, and writes one file per cohort into `recruitment/data_v3.0_glorys12/`.
+
+### What changed from v2.0.0
+
+- **M3, cold sensitivity, is applied**, after M1 and before M4. Like M1 it acts during the 24 days between spawning and release, which are not simulated, and is evaluated at the release cell.
+- **Recruitment has two levels.** A larva that passes M1, M3 and M4 and is at furcilia IV when sea ice advances over it is a recruit, as in Thorpe et al. (2019). Recruits are then split by where they are at that moment: over the shelf or slope (sea floor shallower than 2000 m) or beyond it. The former `killed_M5_not_on_shelf` is the second class of recruits, not a mortality.
+- **The outcome codes are renumbered** (table below; `krico_recruitment.outcome.V2_TO_V3` gives the correspondence).
+- **Diagnostics are stored for every particle**, including those removed by M1 or M3, and the outcome is computed from them. Any threshold can therefore be evaluated from the files, without the trajectories, with the function that produced the dataset:
+  ```python
+  from krico_recruitment import classify, io
+  d, coordinates = io.read_diagnostics("data_v3.0_glorys12/1993_11_15.nc")
+  code = classify.outcome(d, classify.Parameters(m1_sic=0.70), **coordinates)
+  ```
+- With M3 switched off, the classification is that of v2.0.0, particle for particle (`validate_pass1.py regression`).
+
+| Code | Outcome | v2.0.0 code |
+|---|---|---|
+| 0 | `recruit_on_shelf_slope` | 0 `success` |
+| 1 | `recruit_off_shelf_slope` | 5 `killed_M5_not_on_shelf` |
+| 2 | `M1_spawning_under_ice` | 2 |
+| 3 | `M3_cold_sensitivity` | new |
+| 4 | `M4_calyptopis_starvation` | 3 |
+| 5 | `M5_overwintering_stage` | 4 `killed_M5_no_FIV` |
+| 6 | `M6_overwintering_habitat` | 6 |
+| 7 | `censored` | 1 |
+| 8 | `exited_domain` | 7 |
+
+M5 and M6 are evaluated at each particle's own sea-ice advance, detected from 1 April, not at a fixed date. A particle with no advance is M6 (or censored) without its stage being tested.
+
+### M3
+
+Thorpe et al. (2019) remove embryos and larvae whose mean temperature is −1 °C or colder during either the descent or the ascent. Days are counted from the spawning day, day 0: the descent takes the daily means of days 0 to 4, the ascent those of days 5 to 23, and release is day 24. Their embryo sinks at a density-dependent rate and hatches at 530 to 1000 m; the KRICO forcing has no salinity, so:
+
+- the hatching depth is bracketed by 1000 m (baseline) and 530 m, both stored;
+- sinking is steady, so the descent mean is the thickness-weighted mean of the water column from the surface to the hatching depth, over the descent days. The ascent mean is the same column mean over the ascent days.
+
+The column is cut at the sea floor of the cell; a cell with no value removes nothing. M2 (hatching on the sea floor) holds by construction: embryos hatch at 1000 m or shallower and the release cells are 1000 m or deeper. Details in `krico_recruitment/pre_release.py`.
+
+### Variables
+
+All on the `particle` dimension. Days are day indices along the trajectory (0 = release), `uint8`, 255 for none. Development is in thousandths of a stage from the start of calyptopis I, rounded down, `uint16`, 65535 for none (3000 = furcilia I, 6000 = furcilia IV).
+
+| Variable | Type | Serves |
+|---|---|---|
+| `release_lon`, `release_lat`, `release_depth`, `outcome`, `final_lon`, `final_lat`, `final_depth`, `travel_time`, `trajectory_path_length` | as in v2.0.0 | A particle removed by M3 is recorded like one removed by M1: release position, day 0 |
+| `release_cell` | int32 | Index of the particle's cell in the release-cell files |
+| `sic_spawning` | float32 | M1 at any threshold |
+| `m3_descent_temperature`, `m3_ascent_temperature` (particle, hatching_depth) | float32 | M3 at any threshold, for hatching at 530 or 1000 m |
+| `spawning_temperature_surface`, `_mean_100m`, `_mean_200m` | float32 | Warm limit at spawning (a sensitivity, not in `outcome`) |
+| `m4_longest_run` (particle, ice_threshold) | uint8 | Longest run under ice above 0.20, 0.30, 0.40, 0.50, 0.60 during the calyptopis stages: M4 at those thresholds, any duration |
+| `m4_first_run_day`, `m4_first_run_dev` | day, development | First run of more than 10 days above 0.40 over the whole track: M4 under another development rate |
+| `calyptopis_end_day`, `fiv_day` | day | First day at furcilia I, at furcilia IV |
+| `advance_day`, `advance_dev`, `advance_bathymetry`, `advance_lon`, `advance_lat` | day, development, float32 | The state at the advance: any stage, any shelf/slope depth, any development rate |
+| `alive_at_end`, `sic_rising_at_end` | int8 | M6, censoring, domain exit; not masked by the earlier rules |
+| `release_bathymetry` | float32 | Sea floor at release |
+| `days_below_fit` | uint8 | Days below −1 °C, the lower limit of the fitted range of the development function |
+| `ice15_daily`, `shelf2000_daily` (particle, packed_day) | uint8 | One bit per day, `numpy.unpackbits(x, axis=1)[:, :201]`: sea ice above 0.15, sea floor shallower than 2000 m. Another definition of the advance; history on and off the shelf/slope |
+
+Each diagnostic carries as attributes the parameters baked into it; `outcome` carries the baseline parameters. Global attributes hold the provenance (`code_commit`, `code_version`, `dataset_version`, `trajectory_source`, `release_cells_source`, `history`) and the result of the day-0 check: the share of particles whose sea ice and temperature at day 0 equal the release-cell file exactly.
+
+A development rate other than 1 is evaluated by rescaling the development clock (`development.apply_rate`), which is exact up to the daily step of the integration: against a full re-integration on synthetic cohorts, about 0.05% of particles change outcome. It cannot be combined with another M4 threshold or duration.
+
+### Tests
+
+```bash
+cd recruitment/scripts
+sbatch check_inputs.sh                                     # before anything else
+sbatch validate_pass1.sh regression $KRICO_RUNS/KRICO_0001/1993_11_15.nc
+sbatch validate_pass1.sh cohort $KRICO_RUNS/KRICO_0001/1993_11_15.nc data_v3.0_test
+```
+
+- `check_inputs` runs on every cohort the checks the job itself applies, and lists every problem.
+- `regression` classifies a cohort in memory with M3 off and requires the v2.0.0 file in `recruitment/data/`: the outcome through the code table, the eight other variables value for value. With `KRICO_GLORYS12` set it also compares the sea ice at spawning with the monthly files. It then reports what M3 removes.
+- `cohort` writes one file into a test folder and reports on it: outcome recomputed from the stored diagnostics, cross-checks between diagnostics, bytes on disk per variable, run time and peak memory.
+
+### Not ported
+
+`run_year_nsidc.sh` and `run_year_glorys12_25km.sh` stop with a message: `process_cohort.py` reads GLORYS12 sea ice only. The classifications of the [ice-source test](#ice-source-test-nsidc-sea-ice) were produced with the v2 code.
+
 ## Archiving (project maintainer)
 
 To re-create the spawning-year tar.gz archives from `recruitment/data/` (e.g., before uploading to Zenodo):
@@ -191,9 +273,9 @@ cd recruitment/scripts
 
 This produces 32 archives in `recruitment/archives/` (one per spawning year, 1994–2025), each containing 120 cohort files — 121 in the eight leap years, which is how 32 spawning years give 3,848 cohorts.
 
-## Output schema
+## Output schema (v2.0.0)
 
-One row per particle. See the Paper 1 methodology document for full column definitions.
+The schema of v3.0.0 is in [Dataset v3.0.0: pass 1](#dataset-v300-pass-1). One row per particle. See the Paper 1 methodology document for full column definitions.
 
 | Variable | Type | Description |
 |---|---|---|
@@ -229,9 +311,11 @@ The constant lives in `krico_recruitment/sea_ice.py`.
 
 ## Dependencies
 
-Python 3.13.13, `numpy`, `xarray`, `pandas`, `netCDF4`. Parcels is not required.
+Python 3.13.13, `numpy`, `xarray`, `pandas`, `netCDF4`; `h5py` for the bytes per variable in `validate_pass1.py report`. Parcels is not required.
 
 ## Validation
+
+The numbers of this section are those of v2.0.0 and v1.0.0; those of v3.0.0 follow its full run.
 
 Dataset-wide outcome distribution over the full 32-year run (1994–2025, 3 848 cohorts, ≈ 2.1 × 10⁹ particles). Counts and fractions are for v2.0.0, the current classification with M1 at spawning; the last column gives the v1.0.0 fraction, with M1 at release, for comparison.
 

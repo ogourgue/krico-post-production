@@ -5,9 +5,21 @@ Implements Thorpe et al. (2019) Eq. 2 with stage-specific coefficients
 from Table 1. Integrates fractional development along trajectory using
 daily-mean temperature at the particle's actual depth.
 
-Particles begin at stage CI (calyptopis I), consistent with the PoC
-assumption that release at 50-200 m represents post-ascent larvae.
-Naupliar and metanaupliar stages (NI, NII, MN) are skipped.
+Particles begin at stage CI (calyptopis I): release at 50-200 m represents
+larvae that have completed the ascent. The embryo, naupliar and
+metanaupliar stages belong to the 24 days before release, which are not
+simulated.
+
+Storage. Cumulative development is stored in the output files as integer
+thousandths of a stage, rounded down (quantise), so that the stage
+boundaries stay exact: a stored 6000 or more is a larva at FIV or beyond.
+
+Development rate. Every stage of Table 1 has, to the precision of the
+table, the same temperature function: duration = a * (3.73542 + exp(-b T)),
+with only a differing between stages. Development therefore advances along
+one temperature-driven clock on which stage s lasts a[s] units, and a
+uniform change of rate rescales that clock (apply_rate). This is what makes
+"reach FV instead of FIV" and "develop 16% slower" the same test.
 
 References
 ----------
@@ -64,6 +76,10 @@ A = np.array([
     3.1680,   # FV
     2.5344,   # FVI
 ])
+
+# Storage of cumulative development: thousandths of a stage, in uint16.
+DEV_SCALE = 1000
+DEV_MISSING = 65535
 
 # Index of FIV within STAGES (for the "reached FIV" threshold).
 # A particle has reached FIV when cumulative fractional development
@@ -223,3 +239,56 @@ def calyptopis_window_end(cumulative_dev):
     any_reached = reached.any(axis=1)
     day_end = np.where(any_reached, reached.argmax(axis=1), n_obs)
     return day_end.astype(np.int64)
+
+
+def quantise(dev):
+    """
+    Cumulative development as integer thousandths of a stage, rounded down.
+
+    Computed in double precision so that a stage boundary (3.0, 6.0) maps
+    to exactly 3000, 6000 and anything below it to a smaller integer.
+    NaN gives DEV_MISSING.
+    """
+    dev = np.asarray(dev, dtype=np.float64)
+    out = np.full(dev.shape, DEV_MISSING, dtype=np.uint16)
+    ok = np.isfinite(dev)
+    out[ok] = np.floor(dev[ok] * DEV_SCALE).astype(np.uint16)
+    return out
+
+
+def dequantise(dev_q):
+    """Stage units (float64) from stored thousandths; DEV_MISSING gives NaN."""
+    dev_q = np.asarray(dev_q)
+    return np.where(dev_q == DEV_MISSING, np.nan, dev_q / float(DEV_SCALE))
+
+
+def apply_rate(dev, rate):
+    """
+    Cumulative development a larva would have reached, had it developed
+    rate times as fast along the same temperature history.
+
+    Parameters
+    ----------
+    dev : ndarray
+        Cumulative development in stage units (0 = start of CI), at rate 1.
+    rate : float
+        Factor on the development rate of every stage (1 = Table 1).
+
+    Returns
+    -------
+    ndarray, same shape, in stage units, saturating at the end of FVI as
+    the integration does. NaN is propagated.
+
+    Notes
+    -----
+    Exact up to two approximations: the integration advances in daily
+    steps, so a day that straddles a stage boundary is not split; and FII
+    departs from the common temperature function by 0.1% (see the comment
+    on the table). Because stored development saturates at the end of FVI,
+    a factor below 0.633 cannot be evaluated for the FIV test: a larva
+    stored at 9 stages may have gone further.
+    """
+    knots_dev = np.arange(len(STAGES) + 1, dtype=np.float64)
+    knots_clock = np.concatenate(([0.0], np.cumsum(A)))
+    clock = np.interp(np.asarray(dev, dtype=np.float64), knots_dev, knots_clock)
+    return np.interp(rate * clock, knots_clock, knots_dev)

@@ -1,48 +1,48 @@
 #!/bin/bash
 #SBATCH --job-name=recruitment
 #SBATCH --qos=nf
-#SBATCH --time=06:00:00
+#SBATCH --time=08:00:00
 #SBATCH --mem=16G
 #SBATCH --array=1-32
 #SBATCH --output=logs/recruitment_%A_%a.out
 #SBATCH --error=logs/recruitment_%A_%a.err
 
 # ============================================================================
-# KRICO recruitment post-processing — SLURM array
+# KRICO recruitment classification, pass 1 of dataset v3.0.0 — SLURM array
 # ============================================================================
 #
 # One array task per spawning year. Spawning years 1994-2025 (32 years) map
 # to array indices 1-32.
 #
-# Each spawning year spans 4 simulation folders (Nov, Dec, Jan, Feb releases):
-#   KRICO_{4(Y-1994)+1}  Nov releases (year Y-1)
-#   KRICO_{4(Y-1994)+2}  Dec releases (year Y-1)
-#   KRICO_{4(Y-1994)+3}  Jan releases (year Y)
-#   KRICO_{4(Y-1994)+4}  Feb releases (year Y)
+# Each spawning year spans 4 simulation folders (releases of 15 November to
+# 14 March):
+#   KRICO_{4(Y-1994)+1} to KRICO_{4(Y-1994)+4}
 #
-# Within each folder, each daily release file YYYY_MM_DD.nc is processed in
-# series. Outputs go to recruitment/data/ as YYYY_MM_DD.nc (release date in
-# filename uniquely identifies the cohort across folders). Job logs go to
-# recruitment/scripts/logs/, since the SBATCH output paths above are relative
-# to the submission directory.
+# Within each folder, each daily release file YYYY_MM_DD.nc is classified in
+# series by process_cohort.py. The output folder is named on the command
+# line, relative to recruitment/, and must exist: there is no default, so
+# that a classification can never land in the folder of another one.
 #
-# Existing output files are skipped (idempotent re-runs). Note that this makes
-# the script a no-op against a populated output directory: when the
-# classification itself changes, move the previous recruitment/data/ aside
-# first so that a fresh one is created.
+# Besides the trajectories, a cohort needs the release-cell file of its
+# spawning year (preprocess_glorys12_release_cells.sh), from which M1, M3
+# and the temperature at spawning are read. No GLORYS12 forcing file is
+# read.
 #
-# M1 is evaluated at spawning, which precedes release by the descent-ascent
-# interval, so the GLORYS12 sea-ice fields are required in addition to the
-# trajectories. The offset itself is a package constant
-# (krico_recruitment.sea_ice.SPAWNING_OFFSET_DAYS) and is echoed by
-# process_cohort.py for each cohort.
+# Existing output files are skipped, so a failed or interrupted task is
+# simply resubmitted. A file is written under a temporary name and renamed
+# when complete: a file with its final name is a complete file.
+#
+# The files record the commit that produced them: a cohort stops if tracked
+# files are modified or if the commit is not pushed.
+#
+# Before submitting, check the inputs of every cohort (check_inputs.sh).
 #
 # Submit from recruitment/scripts:
-#   export KRICO_RUNS=/scratch/cvan/KRICO/Runs
-#   export KRICO_GLORYS12=/scratch/cvan/KRICO/Pre/GLORYS12
-#   sbatch run_year.sh
-# Or for a subset (e.g. just first year):
-#   sbatch --array=1 run_year.sh
+#   mkdir -p logs ../data_v3.0_glorys12
+#   sbatch --array=1 run_year.sh data_v3.0_glorys12     # 1994, as a test
+#   sbatch --array=2-32 run_year.sh data_v3.0_glorys12  # the rest
+#
+# Requires KRICO_RUNS and KRICO_GLORYS12_RELEASE_CELLS.
 # ============================================================================
 
 set -euo pipefail
@@ -52,49 +52,35 @@ set -euo pipefail
 # ----------------------------------------------------------------------------
 module load python3
 
-# Validate KRICO_RUNS environment variable
-if [[ -z "${KRICO_RUNS:-}" ]]; then
-    echo "ERROR: KRICO_RUNS environment variable not set." >&2
-    echo "Set it to the directory containing raw trajectory simulations, e.g.:" >&2
-    echo "  export KRICO_RUNS=/scratch/cvan/KRICO/Runs" >&2
-    exit 1
-fi
-
-# Validate KRICO_GLORYS12 environment variable. M1 is evaluated at the
-# spawning date, which precedes the trajectory, so sea-ice concentration is
-# read directly from the reanalysis rather than sampled along the trajectory.
-if [[ -z "${KRICO_GLORYS12:-}" ]]; then
-    echo "ERROR: KRICO_GLORYS12 environment variable not set." >&2
-    echo "Set it to the GLORYS12 preprocessing output directory containing" >&2
-    echo "glorys12_ice_YYYY_MM.nc, e.g.:" >&2
-    echo "  export KRICO_GLORYS12=/scratch/cvan/KRICO/Pre/GLORYS12" >&2
-    exit 1
-fi
+for name in KRICO_RUNS KRICO_GLORYS12_RELEASE_CELLS; do
+    if [[ -z "${!name:-}" ]]; then
+        echo "ERROR: ${name} environment variable not set." >&2
+        exit 1
+    fi
+done
 
 # ----------------------------------------------------------------------------
 # Configuration
 # ----------------------------------------------------------------------------
-# Fixed directory structure: script is in recruitment/scripts/
 # Use SLURM_SUBMIT_DIR when running under SLURM (BASH_SOURCE does not resolve
-# correctly when sbatch copies the script to the SLURM spool directory)
+# correctly when sbatch copies the script to the SLURM spool directory).
 SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 RECRUITMENT_DIR="$(dirname "$SCRIPT_DIR")"
-DATA_DIR="${RECRUITMENT_DIR}/data"
 SCRIPT="${SCRIPT_DIR}/process_cohort.py"
 
-mkdir -p "${DATA_DIR}"
-
-# SLURM resolves the SBATCH output paths relative to the submission directory,
-# so the log directory must be created there rather than in RECRUITMENT_DIR.
-mkdir -p "${SCRIPT_DIR}/logs"
+FOLDER="${1:?give the output folder under recruitment/, e.g. data_v3.0_glorys12}"
+DATA_DIR="${RECRUITMENT_DIR}/${FOLDER}"
+if [[ ! -d "${DATA_DIR}" ]]; then
+    echo "ERROR: output folder ${DATA_DIR} does not exist; create it first." >&2
+    exit 1
+fi
 
 # ----------------------------------------------------------------------------
 # Resolve spawning year and the four simulation folders that feed it
 # ----------------------------------------------------------------------------
-YEAR_INDEX=${SLURM_ARRAY_TASK_ID:-1}            # 1..32
-SPAWNING_YEAR=$((1993 + YEAR_INDEX))            # 1994..2025
+YEAR_INDEX=${SLURM_ARRAY_TASK_ID:?run through sbatch --array}   # 1..32
+SPAWNING_YEAR=$((1993 + YEAR_INDEX))                            # 1994..2025
 
-# KRICO_NNNN folders: 4 per spawning year, indexed sequentially.
 FIRST_FOLDER=$((4 * (SPAWNING_YEAR - 1994) + 1))
 FOLDERS=()
 for offset in 0 1 2 3; do
@@ -103,17 +89,17 @@ for offset in 0 1 2 3; do
 done
 
 echo "================================================================"
-echo "Recruitment post-processing for spawning year ${SPAWNING_YEAR}"
+echo "Recruitment classification (pass 1) for spawning year ${SPAWNING_YEAR}"
 echo "Array task: ${YEAR_INDEX}/32"
 echo "Folders: ${FOLDERS[*]}"
 echo "Trajectory input: ${KRICO_RUNS}"
-echo "Sea-ice input: ${KRICO_GLORYS12}"
-echo "Recruitment output: ${DATA_DIR}"
+echo "Release-cell input: ${KRICO_GLORYS12_RELEASE_CELLS}"
+echo "Output: ${DATA_DIR}"
 echo "Script: ${SCRIPT}"
 echo "================================================================"
 
 # ----------------------------------------------------------------------------
-# Process all cohorts for this spawning year
+# Classify all cohorts of this spawning year
 # ----------------------------------------------------------------------------
 n_processed=0
 n_skipped=0
@@ -127,7 +113,6 @@ for folder in "${FOLDERS[@]}"; do
         continue
     fi
 
-    # Glob all daily release files in this folder.
     shopt -s nullglob
     cohort_files=("${folder_path}"/[0-9][0-9][0-9][0-9]_[0-9][0-9]_[0-9][0-9].nc)
     shopt -u nullglob
@@ -151,8 +136,7 @@ for folder in "${FOLDERS[@]}"; do
         fi
 
         echo "  [run]  ${basename}"
-        if python3 "${SCRIPT}" "${cohort_file}" "${output_file}" \
-                   --glorys "${KRICO_GLORYS12}"; then
+        if python3 -u "${SCRIPT}" "${cohort_file}" "${output_file}"; then
             n_processed=$((n_processed + 1))
         else
             echo "  [FAIL] ${basename}" >&2

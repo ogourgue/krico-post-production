@@ -62,6 +62,17 @@
 set -euo pipefail
 
 # ----------------------------------------------------------------------------
+# Not ported to dataset v3.0.0. On this branch process_cohort.py is pass 1 of
+# v3.0.0 and reads GLORYS12 sea ice only; the ice-source option it had in
+# v2.0.1 is not in it yet. The classifications with NSIDC sea ice in
+# recruitment/ were produced with the v2 code (tag v2.0.1 and the commits up
+# to e311ada). Remove this guard when process_cohort.py takes an ice source
+# again.
+# ----------------------------------------------------------------------------
+echo "ERROR: $(basename "$0") is not ported to dataset v3.0.0; see the note at the top of the script." >&2
+exit 1
+
+# ----------------------------------------------------------------------------
 # Environment
 # ----------------------------------------------------------------------------
 module load python3
