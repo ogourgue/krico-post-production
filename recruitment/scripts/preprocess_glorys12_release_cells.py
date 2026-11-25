@@ -31,7 +31,9 @@ classification links a particle to a cell by its index along it.
 Period. Spawning year Y runs from 22 October Y-1 (first spawning date) to
 30 September Y (last tracked day): 344 days, 345 when Y is a leap year. Days
 are found by their date in the monthly files, not by their position:
-glorys12_*_1993_10.nc holds 22 to 31 October only.
+glorys12_*_1993_10.nc holds 22 to 31 October only. A daily mean is normally
+stamped 12:00; the few source records stamped some minutes away are taken
+as the mean of their day and named in the attribute source_stamps_not_at_noon.
 
 Levels. From the surface to the sea floor of the deepest release cell
 (40 levels, the last one centred on 1941.9 m). A neighbour deeper than the
@@ -42,7 +44,7 @@ Output variables
 ----------------
     sea_ice_area_fraction(time, cell)   ileadfra, fraction 0-1
     temperature(time, depth, cell)      votemper, degrees Celsius
-    time(time)                          as in the source, daily means at 12:00
+    time(time)                          day of the daily mean, at 12:00, in the units of the source
     depth(depth), depth_bounds(depth_edge)   deptht, and depthw: level k lies
                                         between depth_bounds[k] and [k + 1]
     cell_y, cell_x, lon, lat, bathymetry, is_release_cell, n_release  (cell)
@@ -64,6 +66,7 @@ import argparse
 import os
 import sys
 import time
+from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
 
 import netCDF4
@@ -79,6 +82,7 @@ TEMP_VAR = "votemper"
 FILL = np.float32(netCDF4.default_fillvals["f4"])
 MISSING_ABOVE = 1e30       # the source marks land and sub-floor values so
 COMPLEVEL = 4
+STAMP_TOLERANCE = timedelta(hours=1)   # of a daily mean around 12:00
 
 
 def _env(name):
@@ -100,9 +104,11 @@ def _months(days):
 
 def _records_by_day(nc, name):
     """
-    {date: (record index, raw time value)} of a monthly file, with the units
-    and calendar of its time axis. Each record must be a daily mean stamped
-    at 12:00, one per day.
+    Records of a monthly file by day: ({date: record index}, units, calendar,
+    odd), one daily mean per day. The stamp is normally 12:00. A few records
+    of the source are stamped some minutes away from it (11:52:30 on
+    19 December 2018 in the sea-ice files); they are accepted within
+    STAMP_TOLERANCE of noon and listed in odd as (date, stamp).
     """
     var = nc["time_counter"]
     raw = np.asarray(var[:], dtype=np.float64)
@@ -110,14 +116,18 @@ def _records_by_day(nc, name):
     stamps = netCDF4.num2date(raw, var.units, calendar=calendar,
                               only_use_cftime_datetimes=False,
                               only_use_python_datetimes=True)
-    records = {}
+    records, odd = {}, []
     for k, stamp in enumerate(np.atleast_1d(stamps)):
-        if (stamp.hour, stamp.minute, stamp.second) != (12, 0, 0):
-            sys.exit(f"ERROR: {name}: record {k} is stamped {stamp}, not 12:00")
+        noon = datetime.combine(stamp.date(), dtime(12))
+        if abs(stamp - noon) > STAMP_TOLERANCE:
+            sys.exit(f"ERROR: {name}: record {k} is stamped {stamp}, more than "
+                     f"{STAMP_TOLERANCE} from 12:00")
+        if stamp != noon:
+            odd.append((stamp.date(), stamp))
         if stamp.date() in records:
             sys.exit(f"ERROR: {name}: two records for {stamp.date()}")
-        records[stamp.date()] = (k, raw[k])
-    return records, var.units, calendar
+        records[stamp.date()] = k
+    return records, var.units, calendar, odd
 
 
 def _check_variable(var, name, dims, shape_tail):
@@ -179,7 +189,7 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
     print(f"  code: {identity['code_version']} ({identity['code_commit'][:7]})")
 
     tmp = out.with_suffix(".nc.part")
-    sources = []
+    sources, odd_stamps = [], []
     with netCDF4.Dataset(tmp, "w", format="NETCDF4") as ds:
         ds.createDimension("time", len(days))
         ds.createDimension("depth", nlev)
@@ -190,7 +200,7 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
 
         vtime = ds.createVariable("time", "f8", ("time",))
         vtime.standard_name = "time"
-        vtime.long_name = "time of the daily mean (12:00)"
+        vtime.long_name = "day of the daily mean, at 12:00"
         vtime.axis = "T"
 
         v = ds.createVariable("depth", "f4", ("depth",))
@@ -290,8 +300,11 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
                                       grid["deptht"]):
                     sys.exit(f"ERROR: {temp_path.name}: deptht differs from "
                              f"{grid['files']['temp']}")
-                rec_i, units_i, cal_i = _records_by_day(fi, ice_path.name)
-                rec_t, units_t, cal_t = _records_by_day(ft, temp_path.name)
+                rec_i, units_i, cal_i, odd_i = _records_by_day(fi, ice_path.name)
+                rec_t, units_t, cal_t, odd_t = _records_by_day(ft, temp_path.name)
+                for label, odd in ((ICE_VAR, odd_i), (TEMP_VAR, odd_t)):
+                    odd_stamps += [f"{label} {stamp}" for d, stamp in odd
+                                   if d in month_days]
                 if (units_i, cal_i) != (units_t, cal_t):
                     sys.exit(f"ERROR: {ice_path.name} and {temp_path.name} "
                              "have different time units")
@@ -305,17 +318,14 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
                     for rec, path in ((rec_i, ice_path), (rec_t, temp_path)):
                         if d not in rec:
                             sys.exit(f"ERROR: {path.name} holds no record for {d}")
-                    (ki, stamp_i), (kt, stamp_t) = rec_i[d], rec_t[d]
-                    if stamp_i != stamp_t:
-                        sys.exit(f"ERROR: {d}: sea-ice and temperature records "
-                                 "have different times")
-                    ice = _take(vi[ki, j0:j1, :], rows, cols)
-                    temp = _take(vt[kt, :nlev, j0:j1, :], rows, cols)
+                    ice = _take(vi[rec_i[d], j0:j1, :], rows, cols)
+                    temp = _take(vt[rec_t[d], :nlev, j0:j1, :], rows, cols)
                     n_missing[0] += int((ice == FILL).sum())
                     n_missing[1] += int((temp == FILL).sum())
                     vice[k, :] = ice
                     vtemp[k, :, :] = temp
-                    vtime[k] = stamp_i
+                    vtime[k] = netCDF4.date2num(datetime.combine(d, dtime(12)),
+                                                units_i, calendar=cal_i)
                     k += 1
             sources += [ice_path.name, temp_path.name]
             n = len(month_days)
@@ -337,6 +347,7 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
                              "copied unchanged")
         ds.source_variables = f"{ICE_VAR}, {TEMP_VAR}"
         ds.source_files = " ".join(sources)
+        ds.source_stamps_not_at_noon = ", ".join(odd_stamps) if odd_stamps else "none"
         ds.cell_definition = (
             "release cells of run.py in krico-templates (sea floor of 1000 "
             "to 2000 m, centre inside CCAMLR subareas 48.1 to 48.6 and 88.3) "
@@ -348,6 +359,8 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
         ds.history = provenance.history_line(
             f"preprocess_glorys12_release_cells.py {year}")
     os.replace(tmp, out)
+    for line in odd_stamps:
+        print(f"  source record not stamped at 12:00: {line}")
     elapsed = time.time() - started
     size = out.stat().st_size
     raw = len(days) * ncell * (nlev + 1) * 4
@@ -407,6 +420,7 @@ def check(glorys_dir, table_path, years):
     print(f"Monthly files, spawning years {years[0]} to {years[-1]}:", flush=True)
     problems = []
     seen = {}
+    odd_stamps = []
     for year in years:
         for (yy, mm), month_days in _months(release_cells.days(year)):
             for pattern in (ICE_PATTERN, TEMP_PATTERN):
@@ -423,7 +437,9 @@ def check(glorys_dir, table_path, years):
                                 _check_variable(nc[TEMP_VAR], path.name,
                                                 ("time_counter", "deptht", "y", "x"),
                                                 (len(grid["deptht"]), ny, nx))
-                            seen[path] = set(_records_by_day(nc, path.name)[0])
+                            records, _, _, odd = _records_by_day(nc, path.name)
+                            seen[path] = set(records)
+                            odd_stamps += [f"{path.name}: {stamp}" for _, stamp in odd]
                 if seen[path] is None:
                     problems.append(f"{path.name} is missing (spawning year {year})")
                 else:
@@ -438,6 +454,11 @@ def check(glorys_dir, table_path, years):
         sys.exit(f"ERROR: {len(set(problems))} problem(s) in the monthly files")
     print(f"  {len(seen)} files present and readable as raw values, every "
           f"day of the {len(years)} period(s) found ({n_days} days)")
+    print(f"  records not stamped at 12:00: {len(odd_stamps)}")
+    for line in odd_stamps[:40]:
+        print(f"    {line}")
+    if len(odd_stamps) > 40:
+        print(f"    ... and {len(odd_stamps) - 40} more")
     print(f"Output, {len(years)} file(s): {total / 1e9:.1f} GB before compression "
           f"({total / len(years) / 1e9:.2f} GB per year)")
     print("Check passed.")
