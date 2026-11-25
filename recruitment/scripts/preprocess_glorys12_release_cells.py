@@ -130,6 +130,18 @@ def _records_by_day(nc, name):
     return records, var.units, calendar, odd
 
 
+def _summarise_stamps(odd):
+    """
+    One line per variable and time of day for records not stamped at 12:00:
+    odd is a list of (label, stamp).
+    """
+    groups = {}
+    for label, stamp in odd:
+        groups.setdefault((label, stamp.time()), []).append(stamp.date())
+    return [f"{label}: {len(d)} records stamped {tod}, {min(d)} to {max(d)}"
+            for (label, tod), d in sorted(groups.items())]
+
+
 def _check_variable(var, name, dims, shape_tail):
     if var.dimensions != dims:
         sys.exit(f"ERROR: {name}: dimensions {var.dimensions}, expected {dims}")
@@ -303,7 +315,7 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
                 rec_i, units_i, cal_i, odd_i = _records_by_day(fi, ice_path.name)
                 rec_t, units_t, cal_t, odd_t = _records_by_day(ft, temp_path.name)
                 for label, odd in ((ICE_VAR, odd_i), (TEMP_VAR, odd_t)):
-                    odd_stamps += [f"{label} {stamp}" for d, stamp in odd
+                    odd_stamps += [(label, stamp) for d, stamp in odd
                                    if d in month_days]
                 if (units_i, cal_i) != (units_t, cal_t):
                     sys.exit(f"ERROR: {ice_path.name} and {temp_path.name} "
@@ -347,7 +359,7 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
                              "copied unchanged")
         ds.source_variables = f"{ICE_VAR}, {TEMP_VAR}"
         ds.source_files = " ".join(sources)
-        ds.source_stamps_not_at_noon = ", ".join(odd_stamps) if odd_stamps else "none"
+        ds.source_stamps_not_at_noon = "; ".join(_summarise_stamps(odd_stamps)) or "none"
         ds.cell_definition = (
             "release cells of run.py in krico-templates (sea floor of 1000 "
             "to 2000 m, centre inside CCAMLR subareas 48.1 to 48.6 and 88.3) "
@@ -359,8 +371,8 @@ def extract_year(year, glorys_dir, out_dir, table_path, allow_dirty=False):
         ds.history = provenance.history_line(
             f"preprocess_glorys12_release_cells.py {year}")
     os.replace(tmp, out)
-    for line in odd_stamps:
-        print(f"  source record not stamped at 12:00: {line}")
+    for line in _summarise_stamps(odd_stamps):
+        print(f"  source records not stamped at 12:00: {line}")
     elapsed = time.time() - started
     size = out.stat().st_size
     raw = len(days) * ncell * (nlev + 1) * 4
@@ -439,7 +451,8 @@ def check(glorys_dir, table_path, years):
                                                 (len(grid["deptht"]), ny, nx))
                             records, _, _, odd = _records_by_day(nc, path.name)
                             seen[path] = set(records)
-                            odd_stamps += [f"{path.name}: {stamp}" for _, stamp in odd]
+                            odd_stamps += [(ICE_VAR if pattern == ICE_PATTERN else TEMP_VAR,
+                                            stamp) for _, stamp in odd]
                 if seen[path] is None:
                     problems.append(f"{path.name} is missing (spawning year {year})")
                 else:
@@ -455,10 +468,8 @@ def check(glorys_dir, table_path, years):
     print(f"  {len(seen)} files present and readable as raw values, every "
           f"day of the {len(years)} period(s) found ({n_days} days)")
     print(f"  records not stamped at 12:00: {len(odd_stamps)}")
-    for line in odd_stamps[:40]:
+    for line in _summarise_stamps(odd_stamps):
         print(f"    {line}")
-    if len(odd_stamps) > 40:
-        print(f"    ... and {len(odd_stamps) - 40} more")
     print(f"Output, {len(years)} file(s): {total / 1e9:.1f} GB before compression "
           f"({total / len(years) / 1e9:.2f} GB per year)")
     print("Check passed.")
