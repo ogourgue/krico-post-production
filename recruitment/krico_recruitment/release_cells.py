@@ -31,6 +31,12 @@ The extraction therefore holds every release cell and its eight neighbours
 (NEIGHBOUR_OFFSETS). A jitter never exceeds half a cell, so no particle can
 lie nearest to a cell outside that set.
 
+Checked on the 2,100,265,336 release positions of the v2.0.0 dataset
+(validate_glorys12_release_cells.py, 25 November 2026): none has its nearest
+grid point outside the set; 242,288 have it in a cell south of a release
+cell, 1,955 in a cell west of one, 4 in another neighbour and none
+south-west. The southern neighbours alone would not have been enough.
+
 Period
 ------
 One file per spawning year Y, from 22 October Y-1 to 30 September Y: the

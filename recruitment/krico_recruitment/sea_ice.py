@@ -26,10 +26,13 @@ GLORYS12 field at the release position on the spawning date instead.
 The release position stands as the spawning position, which is consistent
 with the model's neglect of transport during the descent-ascent interval.
 
-Sampling is nearest-neighbour on the reanalysis grid, whereas Parcels
-interpolates when sampling along trajectories. The two agree to a mean
-absolute difference of 2.4e-06, with disagreement above 0.01 confined to
-0.005% of particles in coastal cells where the field has a sharp gradient.
+Sampling is nearest-neighbour on the reanalysis grid. Parcels does not
+interpolate a tracer in space either: on the C-grid a particle reads the
+value of the cell that holds it, and for particles within float32 rounding
+of a cell edge that cell can be the neighbour of the nearest grid point
+(scripts/validate_glorys12_release_cells.py). At offset zero the two
+readings agree to a mean absolute difference of 2.4e-06, with disagreement
+above 0.01 for 0.005% of particles, where the field has a sharp gradient.
 See krico-paper1/S1_m1_offset_sensitivity/.
 """
 

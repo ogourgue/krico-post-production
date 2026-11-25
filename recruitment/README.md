@@ -128,7 +128,7 @@ M1 is instead evaluated at the release position on the spawning date, sampling t
 
 The offset is a constant, `SPAWNING_OFFSET_DAYS = 24` in `krico_recruitment/sea_ice.py`, taken from the 23-26 day range given by Thorpe et al. (2019). Varying it across that range changes the domain-wide M1 fraction by 0.72 percentage points, from 28.11% to 28.83%; see `S1_m1_offset_sensitivity/` in the [krico-paper1](https://github.com/ogourgue/krico-paper1) repo.
 
-Sampling is nearest-neighbour on the reanalysis grid, whereas Parcels interpolates when sampling along trajectories. Compared against the trajectory value at day 0 across the full 32-year record, the two agree to a mean absolute difference of 1.2 × 10⁻⁵ in sea-ice concentration, and 1.8 × 10⁻⁵ of particles are classified differently. The largest disagreements are in coastal cells where the field has a sharp gradient.
+Sampling is nearest-neighbour on the reanalysis grid. Parcels does not interpolate a tracer in space either: on the C-grid a particle reads the value of the cell that holds it, and for particles within float32 rounding of a cell edge that cell can be the neighbour of the nearest grid point (see [Release-cell extraction](#release-cell-extraction-glorys12-sea-ice-and-temperature)). Compared against the trajectory value at day 0 across the full 32-year record, the two readings agree to a mean absolute difference of 1.2 × 10⁻⁵ in sea-ice concentration, and 1.8 × 10⁻⁵ of particles are classified differently. The largest disagreements are where the field has a sharp gradient.
 
 M1 is the only filter affected. M4 acts from calyptopis I onward, which is the release, and M5 and M6 are triggered by calendar events during tracking.
 
@@ -159,7 +159,8 @@ The rules that act before release, in the 24 days that are not simulated, depend
 - **Cells:** the 35,303 cells in which `run.py` of krico-templates releases particles (`scripts/glorys12_release_cells.csv`: sea floor of 1000 to 2000 m, centre inside CCAMLR subareas 48.1 to 48.6 and 88.3) and their eight neighbours, 55,034 cells. A particle is linked to the grid point nearest to its release position, the sampling rule of M1, and that point can be a neighbour of the cell the particle was generated in (`krico_recruitment/release_cells.py`). The table was built in [krico-paper2](https://github.com/ogourgue/krico-paper2) (`local/subarea/raw/spawning_cells.csv`, sha256 `6c4f0e01f954…`) and reproduces the 546,199 particles generated per release day.
 - **Period:** 22 October (first spawning date) to 30 September (last tracked day) of each spawning year, daily.
 - **Levels:** surface to the sea floor of the deepest release cell, 40 levels; the level bounds (`depthw`) are stored with them.
-- **Values:** copied unchanged as float32, with lossless compression.
+- **Values:** copied unchanged as float32, with lossless compression; 2.1 GB on disk and 15 minutes for spawning year 1994.
+- **Time stamps:** every sea-ice record of the source from 19 December 2018 is stamped 11:52:30 instead of 12:00. It is taken as the mean of its day, and each file summarises such records in `source_stamps_not_at_noon`.
 
 ```bash
 cd scripts && mkdir -p logs
@@ -173,7 +174,9 @@ sbatch validate_glorys12_release_cells.sh day0 \
 sbatch --array=2-32 preprocess_glorys12_release_cells.sh         # the other years
 ```
 
-`validate_glorys12_release_cells.py` runs two tests, whose reports are the job outputs `logs/cells_val_<job id>.out`. Coverage (`--releases`): the nearest grid point of every release position of the dataset is among the extracted cells. Day 0 (trajectory files): the sea ice and temperature a trajectory recorded at its release equal the extraction on the release day, at the cell and level holding the particle; Parcels samples tracers on the C-grid without spatial interpolation and particles are released at 12:00, the time stamp of the daily means, so the comparison is exact, and comparisons shifted by a day or a level must be worse.
+`validate_glorys12_release_cells.py` runs two tests, whose reports are the job outputs `logs/cells_val_<job id>.out`. Coverage (`--releases`): the nearest grid point of every release position of the dataset is among the extracted cells. Day 0 (trajectory files): the sea ice and temperature a trajectory recorded at its release equal the extraction on the release day, at the cell and level of the particle; Parcels samples tracers on the C-grid without spatial interpolation and particles are released at 12:00, the time stamp of the daily means, so the comparison is exact, and comparisons shifted by a day or a level must be worse.
+
+Both tests passed on 25 November 2026. Coverage, over the 2,100,265,336 release positions of the v2.0.0 dataset: none has its nearest grid point outside the extracted cells; 242,288 have it in a cell south of a release cell, 1,955 in a cell west of one and 4 in another neighbour. Day 0, on the cohorts of 15 November 1993, 15 January 1994 and 14 March 1994: at the nearest grid point, temperature is exactly equal for 99.975 to 99.982% of particles and sea ice for 99.987 to 99.997%; one day or one level away, at most 0.007% of temperatures are equal. The particles not reproduced exactly lie within float32 rounding of a cell edge or a level bound, where the stored position cannot tell which cell Parcels used. For cohorts released from 19 December 2018, sea ice at day 0 is close to the extraction but not exactly equal, because Parcels interpolates in time between the shifted stamps.
 
 Every file records the commit that produced it (`code_commit`, `code_version`); the extraction stops if the code is modified, untracked or not pushed.
 

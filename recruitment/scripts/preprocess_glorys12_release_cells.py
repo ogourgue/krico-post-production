@@ -32,8 +32,9 @@ Period. Spawning year Y runs from 22 October Y-1 (first spawning date) to
 30 September Y (last tracked day): 344 days, 345 when Y is a leap year. Days
 are found by their date in the monthly files, not by their position:
 glorys12_*_1993_10.nc holds 22 to 31 October only. A daily mean is normally
-stamped 12:00; the few source records stamped some minutes away are taken
-as the mean of their day and named in the attribute source_stamps_not_at_noon.
+stamped 12:00; the source records stamped some minutes away (every sea-ice
+record from 19 December 2018, at 11:52:30) are taken as the mean of their
+day and summarised in the attribute source_stamps_not_at_noon.
 
 Levels. From the surface to the sea floor of the deepest release cell
 (40 levels, the last one centred on 1941.9 m). A neighbour deeper than the
@@ -109,10 +110,10 @@ def _records_by_day(nc, name):
     """
     Records of a monthly file by day: ({date: record index}, odd), one daily
     mean per day. The time units are read from each file, since they are not
-    written the same way in all of them. The stamp is normally 12:00. A few records
-    of the source are stamped some minutes away from it (11:52:30 on
-    19 December 2018 in the sea-ice files); they are accepted within
-    STAMP_TOLERANCE of noon and listed in odd as (date, stamp).
+    written the same way in all of them. The stamp is normally 12:00. Some
+    records of the source are stamped some minutes away from it (11:52:30
+    for every sea-ice record from 19 December 2018); they are accepted
+    within STAMP_TOLERANCE of noon and listed in odd as (date, stamp).
     """
     var = nc["time_counter"]
     stamps = netCDF4.num2date(_raw(var), var.units,

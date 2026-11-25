@@ -35,15 +35,36 @@ day. The extraction must therefore return them exactly.
 For each trajectory file the test compares the trajectory's
 sea_ice_area_fraction and temperature at obs 0 with the extraction
 
-  - at the cell holding the release position (the Parcels rule) and at the
-    grid point nearest to it (the rule of the classification); the two
-    differ for the particles described in krico_recruitment/release_cells.py;
+  - at the cell holding the release position and at the grid point nearest
+    to it (the rule of the classification);
   - on the release day and, as controls of the indexing, one day earlier and
     later, and one level higher and lower. The controls must be worse.
 
 Verdict per file: PASS when no particle is outside the extracted cells, the
 unshifted comparison is the best one, and at least 99.9% of the particles
 are reproduced exactly at the cell holding them.
+
+Result (25 November 2026, cohorts of 15 November 1993, 15 January 1994 and
+14 March 1994, extraction of spawning year 1994): PASS. On the release day,
+temperature is exactly equal for 99.964 to 99.967% of particles at the cell
+holding them and for 99.975 to 99.982% at the nearest grid point; sea ice
+for 99.973 to 99.983% and 99.987 to 99.997%. One day or one level away, at
+most 0.007% of temperatures are equal. This confirms the indexing of the
+extraction and the absence of spatial interpolation in Parcels.
+
+The nearest grid point does at least as well as the cell holding the
+position. The two rules differ for about 300 particles per cohort, which
+lie within a few millionths of a degree of a cell edge: the trajectory
+files store positions as float32, which cannot tell on which side Parcels,
+working in double precision, placed them. The particles not reproduced
+exactly (100 to 200 per cohort) are read as such edge cases, in the
+horizontal or at a level bound; this was not verified particle by particle.
+
+From 19 December 2018 the sea-ice records are stamped 11:52:30 instead of
+12:00. Parcels interpolates in time between stamps, so a particle released
+at 12:00 reads the field of its day with 0.5% of the next day mixed in: for
+cohorts released from that date, sea ice at day 0 is close to the
+extraction but not exactly equal. Temperature records are all at 12:00.
 
 Environment
 -----------
