@@ -128,10 +128,14 @@ def _check_variable(var, name, dims, shape_tail):
                  f"{', '.join(map(str, shape_tail))})")
     if var.dtype.kind != "f":
         sys.exit(f"ERROR: {name}: stored as {var.dtype}, expected floating point")
-    for attr in ("scale_factor", "add_offset"):
-        if attr in var.ncattrs():
-            sys.exit(f"ERROR: {name}: packed values ({attr}); the extraction "
-                     "copies raw values and cannot read them")
+    # The Mercator files carry scale_factor = 1 and add_offset = 0 on float32
+    # values: the stored values are the physical ones. Any other packing
+    # would make a raw copy wrong.
+    for attr, neutral in (("scale_factor", 1.0), ("add_offset", 0.0)):
+        if attr in var.ncattrs() and float(var.getncattr(attr)) != neutral:
+            sys.exit(f"ERROR: {name}: packed values ({attr} = "
+                     f"{var.getncattr(attr)}); the extraction copies raw "
+                     "values and cannot read them")
     var.set_auto_maskandscale(False)
 
 
@@ -412,6 +416,13 @@ def check(glorys_dir, table_path, years):
                         seen[path] = None
                     else:
                         with netCDF4.Dataset(path) as nc:
+                            if pattern == ICE_PATTERN:
+                                _check_variable(nc[ICE_VAR], path.name,
+                                                ("time_counter", "y", "x"), (ny, nx))
+                            else:
+                                _check_variable(nc[TEMP_VAR], path.name,
+                                                ("time_counter", "deptht", "y", "x"),
+                                                (len(grid["deptht"]), ny, nx))
                             seen[path] = set(_records_by_day(nc, path.name)[0])
                 if seen[path] is None:
                     problems.append(f"{path.name} is missing (spawning year {year})")
@@ -425,8 +436,8 @@ def check(glorys_dir, table_path, years):
     if problems:
         print("\n".join(f"  {p}" for p in sorted(set(problems))))
         sys.exit(f"ERROR: {len(set(problems))} problem(s) in the monthly files")
-    print(f"  {len(seen)} files present, every day of the {len(years)} "
-          f"period(s) found ({n_days} days)")
+    print(f"  {len(seen)} files present and readable as raw values, every "
+          f"day of the {len(years)} period(s) found ({n_days} days)")
     print(f"Output, {len(years)} file(s): {total / 1e9:.1f} GB before compression "
           f"({total / len(years) / 1e9:.2f} GB per year)")
     print("Check passed.")
