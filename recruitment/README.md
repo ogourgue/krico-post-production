@@ -241,7 +241,7 @@ All on the `particle` dimension. Days are day indices along the trajectory (0 = 
 | `days_below_fit` | uint8 | Days below −1 °C, the lower limit of the fitted range of the development function |
 | `ice15_daily`, `shelf2000_daily` (particle, packed_day) | uint8 | One bit per day, `numpy.unpackbits(x, axis=1)[:, :201]`: sea ice above 0.15, sea floor shallower than 2000 m. Another definition of the advance; history on and off the shelf/slope |
 
-Each diagnostic carries as attributes the parameters baked into it; `outcome` carries the baseline parameters. Global attributes hold the provenance (`code_commit`, `code_version`, `dataset_version`, `trajectory_source`, `release_cells_source`, `history`) and the result of the day-0 check: the share of particles whose sea ice and temperature at day 0 equal the release-cell file exactly.
+Each diagnostic carries as attributes the parameters baked into it; `outcome` carries the baseline parameters. Global attributes hold the provenance (`code_commit`, `code_version`, `dataset_version`, `trajectory_source`, `release_cells_source`, `history`) and the result of the day-0 check: the share of particles whose sea ice and temperature at day 0 equal the release-cell file exactly, the share within 0.01, and the mean and largest difference.
 
 A development rate other than 1 is evaluated by rescaling the development clock (`development.apply_rate`), which is exact up to the daily step of the integration: against a full re-integration on synthetic cohorts, about 0.05% of particles change outcome. It cannot be combined with another M4 threshold or duration.
 

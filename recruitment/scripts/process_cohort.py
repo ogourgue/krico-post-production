@@ -69,9 +69,10 @@ from krico_recruitment import (classify, inputs, pre_release, provenance,  # noq
                                sea_ice, trajectory, io as krico_io)
 from krico_recruitment.outcome import OUTCOME_MEANINGS  # noqa: E402
 
-# Share of particles whose day-0 values must equal the release-cell file
-# exactly for the check to be reported as expected (sea ice from
-# 19 December 2018 is excepted: its records are stamped 11:52:30).
+# Share of particles whose day-0 values must lie within
+# pre_release.DAY0_TOLERANCE of the release-cell file for the check to be
+# reported as expected. The share exactly equal is reported too, but drops
+# for sea ice from 19 December 2018, whose records are stamped 11:52:30.
 DAY0_EXPECTED_SHARE = 0.999
 
 
@@ -159,12 +160,14 @@ def summary(variables, info, log=print):
     log("Day-0 check, trajectory against the release-cell file:")
     for name, s in info["day0"].items():
         note = ""
-        if not s["exact_share"] >= DAY0_EXPECTED_SHARE:
-            note = (f"   WARNING: below {100 * DAY0_EXPECTED_SHARE}% (expected "
-                    "for sea ice from 19 December 2018 only)")
+        if not s["within_tolerance_share"] >= DAY0_EXPECTED_SHARE:
+            note = f"   WARNING: below {100 * DAY0_EXPECTED_SHARE}% within tolerance"
         log(f"  {name:12s} {100 * s['exact_share']:8.4f}% exactly equal, "
-            f"largest difference {s['max_abs_difference']:.3e}, "
-            f"{s['compared']} particles compared{note}")
+            f"{100 * s['within_tolerance_share']:8.4f}% within "
+            f"{pre_release.DAY0_TOLERANCE}, mean difference "
+            f"{s['mean_abs_difference']:.3e}, largest "
+            f"{s['max_abs_difference']:.3e}, {s['compared']} particles "
+            f"compared{note}")
 
 
 def process_cohort(input_path, output_path, release_cells_dir,
@@ -198,13 +201,21 @@ def process_cohort(input_path, output_path, release_cells_dir,
     }
     for name, s in info["day0"].items():
         attributes[f"day0_{name}_exact_share"] = np.float64(s["exact_share"])
+        attributes[f"day0_{name}_within_tolerance_share"] = np.float64(
+            s["within_tolerance_share"])
+        attributes[f"day0_{name}_mean_abs_difference"] = np.float64(
+            s["mean_abs_difference"])
         attributes[f"day0_{name}_max_abs_difference"] = np.float64(s["max_abs_difference"])
         attributes[f"day0_{name}_particles_compared"] = np.int64(s["compared"])
+    attributes["day0_tolerance"] = np.float64(pre_release.DAY0_TOLERANCE)
     attributes["day0_comment"] = (
         "sea ice and temperature of the trajectory at day 0 against the "
         "release-cell file on the release day, at the release cell and at "
         "the level holding the release depth: share of particles exactly "
-        "equal and largest absolute difference")
+        "equal, share within day0_tolerance, mean and largest absolute "
+        "difference. From 19 December 2018 the sea-ice records of the "
+        "forcing are stamped 11:52:30, so a trajectory's sea ice at day 0 "
+        "holds 0.5% of the next day and is no longer exactly equal")
 
     print(f"Writing {output_path}")
     krico_io.write_classification_file(output_path, particle_id, variables,

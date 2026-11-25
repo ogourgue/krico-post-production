@@ -265,15 +265,23 @@ def evaluate(static, release_day, cell, **parameters):
                                                **parameters).items()}
 
 
+# Difference (sea-ice fraction or degC) below which a day-0 value counts as
+# reproduced; the tolerance of validate_glorys12_release_cells.py.
+DAY0_TOLERANCE = 0.01
+
+
 def _compare(trajectory, reference):
     both = np.isfinite(trajectory) & np.isfinite(reference)
     n = int(both.sum())
     if n == 0:
-        return {"compared": 0, "exact_share": float("nan"),
-                "max_abs_difference": float("nan")}
+        nan = float("nan")
+        return {"compared": 0, "exact_share": nan, "within_tolerance_share": nan,
+                "mean_abs_difference": nan, "max_abs_difference": nan}
     d = np.abs(trajectory[both].astype(np.float64)
                - reference[both].astype(np.float64))
     return {"compared": n, "exact_share": float((d == 0).mean()),
+            "within_tolerance_share": float((d <= DAY0_TOLERANCE).mean()),
+            "mean_abs_difference": float(d.mean()),
             "max_abs_difference": float(d.max())}
 
 
@@ -287,10 +295,13 @@ def day0_check(static, release_day, cell, depth, sic_day0, temperature_day0):
     so the two are equal except for particles within rounding of a cell
     edge or a level bound, and for sea ice from 19 December 2018, whose
     records are stamped 11:52:30 (Parcels then mixes in 0.5% of the next
-    day). Expect 99.96 to 99.99% exactly equal.
+    day). Expect 99.96 to 99.99% exactly equal, except for sea ice from
+    that date, where the share within DAY0_TOLERANCE and the mean
+    difference are the meaningful numbers.
 
     Returns {"sea_ice": {...}, "temperature": {...}}, each with compared,
-    exact_share and max_abs_difference.
+    exact_share, within_tolerance_share, mean_abs_difference and
+    max_abs_difference.
     """
     t = day_index(static, release_day)
     reference_ice = read_ice(static, t)[cell]

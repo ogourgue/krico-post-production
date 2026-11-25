@@ -62,7 +62,8 @@ import numpy as np
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from krico_recruitment import classify, development, sea_ice, io as krico_io  # noqa: E402
+from krico_recruitment import (classify, development, pre_release,  # noqa: E402
+                               sea_ice, io as krico_io)
 from krico_recruitment.outcome import (OUTCOME_CODES, OUTCOME_MEANINGS,  # noqa: E402
                                        V2_MEANINGS, V2_TO_V3)
 import process_cohort  # noqa: E402
@@ -139,7 +140,10 @@ def regression(trajectory_path, release_cells_dir, v2_dir):
           f"M3, {100 * recruits.mean():.2f}% with M3")
     for name, s in info["day0"].items():
         print(f"  day 0, {name}: {100 * s['exact_share']:.4f}% exactly equal, "
-              f"largest difference {s['max_abs_difference']:.3e}")
+              f"{100 * s['within_tolerance_share']:.4f}% within "
+              f"{pre_release.DAY0_TOLERANCE}, mean difference "
+              f"{s['mean_abs_difference']:.3e}, largest "
+              f"{s['max_abs_difference']:.3e}")
 
     # Sea ice at spawning, value for value, against the reading of v2.0.0
     # from the monthly files (sea_ice.spawning_sic): the direct test that
@@ -244,8 +248,32 @@ def report(path):
     for name in ("sea_ice", "temperature"):
         print(f"  day 0, {name}: "
               f"{100 * float(attrs[f'day0_{name}_exact_share']):.4f}% exactly "
-              f"equal, largest difference "
+              f"equal, "
+              f"{100 * float(attrs[f'day0_{name}_within_tolerance_share']):.4f}% "
+              f"within {float(attrs['day0_tolerance'])}, mean difference "
+              f"{float(attrs[f'day0_{name}_mean_abs_difference']):.3e}, largest "
               f"{float(attrs[f'day0_{name}_max_abs_difference']):.3e}")
+
+    # What the rules before release read, for every particle of the cohort.
+    sic = d["sic_spawning"].astype(np.float64)
+    print(f"  sea ice at spawning: {int(np.isnan(sic).sum())} without a value, "
+          f"{100 * np.nanmean(sic >= 0.80):.2f}% at 0.80 or above")
+    print("  M3, colder of the descent and ascent means (degC), all particles:")
+    for h, depth in enumerate(coordinates["hatching_depths"]):
+        cold = np.fmin(d["m3_descent_temperature"][:, h],
+                       d["m3_ascent_temperature"][:, h]).astype(np.float64)
+        q = np.nanpercentile(cold, [0, 1, 10, 50, 90, 100])
+        print(f"    hatching at {depth:6.0f} m: min {q[0]:6.3f}, 1% {q[1]:6.3f}, "
+              f"10% {q[2]:6.3f}, median {q[3]:6.3f}, 90% {q[4]:6.3f}, max "
+              f"{q[5]:6.3f}; at -1 or colder {int((cold <= -1.0).sum())}, "
+              f"at -0.5 or colder {int((cold <= -0.5).sum())}, without a "
+              f"value {int(np.isnan(cold).sum())}")
+    surface = d["spawning_temperature_surface"].astype(np.float64)
+    mean100 = d["spawning_temperature_mean_100m"].astype(np.float64)
+    print(f"  temperature at spawning (degC): surface {np.nanmin(surface):.2f} "
+          f"to {np.nanmax(surface):.2f}, top 100 m {np.nanmin(mean100):.2f} to "
+          f"{np.nanmax(mean100):.2f}; top 100 m above 3 degC for "
+          f"{int((mean100 > 3.0).sum())} particles")
 
     sizes = _storage(path)
     total = path.stat().st_size
