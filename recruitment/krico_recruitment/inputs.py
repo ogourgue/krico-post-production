@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 
-from krico_recruitment import pre_release, release_cells, sea_ice
+from krico_recruitment import nsidc_ice, pre_release, release_cells, sea_ice
 
 # Float variables read along each trajectory, as written by run.py of
 # krico-templates: (trajectory, obs), NaN after deletion.
@@ -36,8 +36,20 @@ def cohort_day(path):
     return date(*map(int, match.groups()))
 
 
+def check_ice_source(ice_source, ice_dir):
+    """The ice source is one the classification knows, with its folder."""
+    if ice_source != "glorys12":
+        if ice_source not in nsidc_ice.SOURCES:
+            raise ValueError(f"unknown ice source {ice_source!r}: glorys12, "
+                             + ", ".join(nsidc_ice.SOURCES))
+        if not ice_dir:
+            raise ValueError(f"ice source {ice_source} needs the folder of "
+                             "its monthly files ($"
+                             f"{nsidc_ice.SOURCES[ice_source]['env']})")
+
+
 def check_cohort(trajectory_path, release_cells_dir, statics=None,
-                 read_positions=True):
+                 read_positions=True, ice_source="glorys12", ice_dir=None):
     """
     Check the inputs of one cohort and return what the classification
     needs from them.
@@ -52,6 +64,11 @@ def check_cohort(trajectory_path, release_cells_dir, statics=None,
     read_positions : bool
         False skips the checks that read the release positions (headers
         and release time only).
+    ice_source, ice_dir : str
+        "glorys12" (the sea ice of the trajectory file and of the
+        release-cell file), or a product of nsidc_ice.SOURCES with the
+        folder of its monthly files, which must then hold every day from
+        the spawning day to the last tracked day.
 
     Returns
     -------
@@ -59,6 +76,7 @@ def check_cohort(trajectory_path, release_cells_dir, statics=None,
     .open_static) and, if read_positions, cell (index of the release cell
     of every particle) and depth (release depths).
     """
+    check_ice_source(ice_source, ice_dir)
     path = Path(trajectory_path)
     name = path.name
     day = cohort_day(path)
@@ -121,6 +139,12 @@ def check_cohort(trajectory_path, release_cells_dir, statics=None,
             statics[cells_path] = static
     pre_release.day_index(static, day - timedelta(days=sea_ice.SPAWNING_OFFSET_DAYS))
     pre_release.day_index(static, day)
+
+    if ice_source != "glorys12":
+        nsidc_ice.check_coverage(
+            ice_dir, day - timedelta(days=sea_ice.SPAWNING_OFFSET_DAYS),
+            day + timedelta(days=n_obs - 1),
+            nsidc_ice.SOURCES[ice_source]["pattern"])
 
     result = {"release_day": day, "n_particles": n, "n_obs": n_obs,
               "static": static}

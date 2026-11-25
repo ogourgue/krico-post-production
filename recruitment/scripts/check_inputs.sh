@@ -19,10 +19,13 @@
 # Submit from recruitment/scripts, before run_year.sh:
 #   mkdir -p logs
 #   sbatch check_inputs.sh
+#   sbatch check_inputs.sh nsidc             # before a run with NSIDC sea ice
+#   sbatch check_inputs.sh glorys12_25km     # or GLORYS12 ice on the NSIDC grid
 # Then, with the job number sbatch printed:
 #   grep -h "verdict\|PROBLEM\|WARNING" logs/p1_check_<job id>_*.out
 #
-# Requires KRICO_RUNS and KRICO_GLORYS12_RELEASE_CELLS.
+# Requires KRICO_RUNS and KRICO_GLORYS12_RELEASE_CELLS, and KRICO_NSIDC or
+# KRICO_GLORYS12_25KM for the other ice sources.
 # ============================================================================
 
 set -euo pipefail
@@ -33,4 +36,4 @@ SCRIPT_DIR="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 INDEX=${SLURM_ARRAY_TASK_ID:?run through sbatch, or call check_inputs.py YEAR directly}
 YEAR=$((1993 + INDEX))
 
-python3 -u "${SCRIPT_DIR}/check_inputs.py" "${YEAR}"
+python3 -u "${SCRIPT_DIR}/check_inputs.py" "${YEAR}" "$@"

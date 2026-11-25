@@ -28,11 +28,9 @@ recruitment/
 │   └── provenance.py              # Commit and version written into the output files
 ├── scripts/
 │   ├── process_cohort.py          # Pass 1: classification of one cohort
-│   ├── run_year.sh                # SLURM array driver (1 task per spawning year)
+│   ├── run_year.sh                # SLURM array driver (1 task per spawning year; any ice source)
 │   ├── check_inputs.py / .sh      # Inputs of pass 1, checked for every cohort before submission
 │   ├── validate_pass1.py / .sh    # Regression against v2.0.0, report on written files
-│   ├── run_year_nsidc.sh          # v2 only, not ported: NSIDC sea ice (see Ice-source test)
-│   ├── run_year_glorys12_25km.sh  # v2 only, not ported: GLORYS12 ice on the NSIDC grid
 │   ├── download_nsidc.py / .sh    # Daily NSIDC G02202 v6 files (Python + SLURM array)
 │   ├── nsidc_daily_provenance.txt # DOI, URL, access date, sha256 of every daily file
 │   ├── download_pisces.py / .sh   # Daily 3D chlorophyll of the PISCES hindcast (Copernicus Marine toolbox)
@@ -51,6 +49,8 @@ recruitment/
 │   └── download_from_zenodo.py    # Download archives from Zenodo
 ├── data/                          # Recruitment outputs, v2.0.0 (gitignored)
 ├── data_v3.0_glorys12/            # Pass 1 outputs, v3.0.0 (gitignored)
+├── data_v3.0_nsidc/               # Same, with NSIDC sea ice (see Ice-source test)
+├── data_v3.0_glorys12_25km/       # Same, with GLORYS12 ice on the NSIDC grid
 ├── data_nsidc/                    # Recruitment outputs with NSIDC sea ice (gitignored)
 ├── data_glorys12_25km/            # Same, with GLORYS12 ice on the NSIDC grid (gitignored)
 └── archives/                      # Spawning-year tar.gz archives (gitignored)
@@ -147,11 +147,19 @@ python3 preprocess_nsidc.py --check-grid # grid geometry against the ancillary l
 sbatch preprocess_nsidc.sh               # monthly stacks nsidc_ice_YYYY_MM.nc, 385 files
 ```
 
-Then `sbatch run_year_nsidc.sh` runs the classification into `data_nsidc/`, with `--ice-source nsidc` passed to `process_cohort.py`. Output files carry `sic_source = "NSIDC G02202 v6 (...)"` and `nsidc_nearest_ocean`; the production files carry `sic_source = "GLORYS12"` (v2.0.0 files predate the attribute and have only `m1_sic_source`). The two sets must not be combined.
+Then the classification is run with that sea ice into its own folder (`run_year.sh` refuses a folder whose name does not end with the ice source):
 
-A third classification separates resolution from product in the comparison: `preprocess_glorys12_25km.py` bins the GLORYS12 monthly ice onto the NSIDC grid (plain mean of the ORCA12 cells inside each 25 km cell, NSIDC land/coast/lake as fill) into `$KRICO_GLORYS12_25KM`, and `run_year_glorys12_25km.sh` runs the classification on it through the same sampler (`--ice-source glorys12_25km`) into `data_glorys12_25km/`, with `sic_source = "GLORYS12v1 ice binned onto the NSIDC G02202 25 km grid"`. Native GLORYS12 minus this run is the resolution and sampling effect; this run minus NSIDC is the product difference at equal resolution. On the full record the resolution effect is at or below 0.1 percentage points for every outcome domain-wide, so the whole GLORYS12-versus-NSIDC difference is in the ice values.
+```bash
+mkdir -p ../data_v3.0_nsidc
+sbatch check_inputs.sh nsidc                 # also checks that the monthly stacks cover every cohort
+sbatch run_year.sh data_v3.0_nsidc nsidc
+```
 
-Sampling reads the 25 km cell containing each position, with no interpolation (`krico_recruitment/nsidc_ice.py`). Coast and land cells are fill in the CDR and read NaN, which the filters treat as below threshold; a nearest-ocean redirection exists (`--nsidc-nearest-ocean`) but is not used, because on four cohorts spanning the record coast cells hold 0.3-0.4% of positions and move M1 by at most 0.4 points. On those cohorts the two readings agree along trajectories to r = 0.97-0.98 and a mean absolute difference of 0.035-0.044 in concentration, M1 differs by 2-4 points in either direction, and advance detection by under 1 point (`scripts/validate_nsidc.csv`). The 2.2% of release positions north of the NSIDC grid edge (50-51°S, 8°W-7°E, in 48.6N) read NaN and get the same outcome in both products, since neither has ice there.
+Output files carry `sic_source = "NSIDC G02202 v6 (...)"` and `sic_sampling`; the production files carry `sic_source = "GLORYS12"`. The temperatures behind M3 and development, and the release-cell link, are those of GLORYS12 in every set, and the day-0 check always compares the GLORYS12 sea ice of the trajectory file with the release-cell file. The sets must not be combined. The v2 classifications of this test are in `data_nsidc/` and `data_glorys12_25km/` (v2 code, `run_year_nsidc.sh` and `run_year_glorys12_25km.sh` up to commit `889ad21`); with M3 off, the v3.0.0 classification reproduces them particle for particle (`validate_pass1.sh regression_nsidc`, `regression_glorys12_25km`).
+
+A third classification separates resolution from product in the comparison: `preprocess_glorys12_25km.py` bins the GLORYS12 monthly ice onto the NSIDC grid (plain mean of the ORCA12 cells inside each 25 km cell, NSIDC land/coast/lake as fill) into `$KRICO_GLORYS12_25KM`, and `sbatch run_year.sh data_v3.0_glorys12_25km glorys12_25km` runs the classification on it through the same sampler, with `sic_source = "GLORYS12v1 ice binned onto the NSIDC G02202 25 km grid"`. Native GLORYS12 minus this run is the resolution and sampling effect; this run minus NSIDC is the product difference at equal resolution. On the full record the resolution effect is at or below 0.1 percentage points for every outcome domain-wide, so the whole GLORYS12-versus-NSIDC difference is in the ice values.
+
+Sampling reads the 25 km cell containing each position, with no interpolation (`krico_recruitment/nsidc_ice.py`). Coast and land cells are fill in the CDR and read NaN, which the filters treat as below threshold; a nearest-ocean redirection exists in the sampler (`nearest_ocean`) but is not used and is no longer a command-line option, because on four cohorts spanning the record coast cells hold 0.3-0.4% of positions and move M1 by at most 0.4 points. On those cohorts the two readings agree along trajectories to r = 0.97-0.98 and a mean absolute difference of 0.035-0.044 in concentration, M1 differs by 2-4 points in either direction, and advance detection by under 1 point (`scripts/validate_nsidc.csv`). The 2.2% of release positions north of the NSIDC grid edge (50-51°S, 8°W-7°E, in 48.6N) read NaN and get the same outcome in both products, since neither has ice there.
 
 ## Release-cell extraction (GLORYS12 sea ice and temperature)
 
@@ -190,6 +198,7 @@ Pass 1 (`process_cohort.py`) reads one trajectory file and the release-cell file
 - **M3, cold sensitivity, is applied**, after M1 and before M4. Like M1 it acts during the 24 days between spawning and release, which are not simulated, and is evaluated at the release cell.
 - **Recruitment has two levels.** A larva that passes M1, M3 and M4 and is at furcilia IV when sea ice advances over it is a recruit, as in Thorpe et al. (2019). Recruits are then split by where they are at that moment: over the shelf or slope (sea floor shallower than 2000 m) or beyond it. The former `killed_M5_not_on_shelf` is the second class of recruits, not a mortality.
 - **The outcome codes are renumbered** (table below; `krico_recruitment.outcome.V2_TO_V3` gives the correspondence).
+- **One script for every ice source.** `process_cohort.py --ice-source` and a second word to `run_year.sh` replace the two separate drivers of v2 (see [Ice-source test](#ice-source-test-nsidc-sea-ice)).
 - **Diagnostics are stored for every particle**, including those removed by M1 or M3, and the outcome is computed from them. Any threshold can therefore be evaluated from the files, without the trajectories, with the function that produced the dataset:
   ```python
   from krico_recruitment import classify, io
@@ -251,16 +260,13 @@ A development rate other than 1 is evaluated by rescaling the development clock 
 cd recruitment/scripts
 sbatch check_inputs.sh                                     # before anything else
 sbatch validate_pass1.sh regression $KRICO_RUNS/KRICO_0001/1993_11_15.nc
+sbatch validate_pass1.sh regression_nsidc $KRICO_RUNS/KRICO_0001/1993_11_15.nc   # another ice source
 sbatch validate_pass1.sh cohort $KRICO_RUNS/KRICO_0001/1993_11_15.nc data_v3.0_test
 ```
 
 - `check_inputs` runs on every cohort the checks the job itself applies, and lists every problem.
 - `regression` classifies a cohort in memory with M3 off and requires the v2.0.0 file in `recruitment/data/`: the outcome through the code table, the eight other variables value for value. With `KRICO_GLORYS12` set it also compares the sea ice at spawning with the monthly files. It then reports what M3 removes.
 - `cohort` writes one file into a test folder and reports on it: outcome recomputed from the stored diagnostics, cross-checks between diagnostics, bytes on disk per variable, run time and peak memory.
-
-### Not ported
-
-`run_year_nsidc.sh` and `run_year_glorys12_25km.sh` stop with a message: `process_cohort.py` reads GLORYS12 sea ice only. The classifications of the [ice-source test](#ice-source-test-nsidc-sea-ice) were produced with the v2 code.
 
 ## Archiving (project maintainer)
 

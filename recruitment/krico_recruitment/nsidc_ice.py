@@ -63,12 +63,18 @@ SOURCES = {
     "nsidc": {
         "pattern": NSIDC_ICE_PATTERN,
         "id": SOURCE_ID,
+        "env": "KRICO_NSIDC",
     },
     "glorys12_25km": {
         "pattern": "glorys12_25km_ice_{year:04d}_{month:02d}.nc",
         "id": "GLORYS12v1 ice binned onto the NSIDC G02202 25 km grid",
+        "env": "KRICO_GLORYS12_25KM",
     },
 }
+
+# How these products are read, written into the files classified with them.
+SAMPLING = ("cell of the NSIDC 25 km grid containing the position, no "
+            "interpolation; coast and land cells hold no value")
 
 # Raw monthly arrays (uint8, (ndays, NROW, NCOL), ~3 MB each) cached by
 # (dir, year, month). A cohort needs at most 9 consecutive months (spawning
@@ -125,6 +131,21 @@ def _load_range(nsidc_dir, first_day, last_day, pattern=NSIDC_ICE_PATTERN):
             f"{len(missing)} days, first {missing[0].date()}"
         )
     return np.concatenate(blocks, axis=0)
+
+
+def check_coverage(nsidc_dir, first_day, last_day, pattern=NSIDC_ICE_PATTERN):
+    """
+    Raise ValueError (or FileNotFoundError) unless the monthly files hold
+    every day from first_day to last_day on the expected grid: what
+    spawning_sic and along_trajectory_sic require of them.
+    """
+    try:
+        _load_range(nsidc_dir, first_day, last_day, pattern)
+    except OSError as exc:
+        raise FileNotFoundError(
+            f"sea-ice files of {pd.Timestamp(first_day).date()} to "
+            f"{pd.Timestamp(last_day).date()} cannot be read in {nsidc_dir}: "
+            f"{exc}") from exc
 
 
 def _nearest_ocean_map(nsidc_dir):

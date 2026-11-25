@@ -28,6 +28,10 @@ M3 on and reports what M3 removes and from which v2.0.0 outcome.
 The v2.0.0 files are read from recruitment/data/ (--v2 DIR for another
 folder).
 
+With --ice-source nsidc or glorys12_25km the same test runs on the
+classification with that sea ice, against the v2 files of the ice-source
+test in recruitment/data_nsidc/ or recruitment/data_glorys12_25km/.
+
 Report
 ------
 For each file written by process_cohort.py:
@@ -62,8 +66,8 @@ import numpy as np
 import xarray as xr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from krico_recruitment import (classify, development, pre_release,  # noqa: E402
-                               sea_ice, io as krico_io)
+from krico_recruitment import (classify, development, nsidc_ice,  # noqa: E402
+                               pre_release, sea_ice, io as krico_io)
 from krico_recruitment.outcome import (OUTCOME_CODES, OUTCOME_MEANINGS,  # noqa: E402
                                        V2_MEANINGS, V2_TO_V3)
 import process_cohort  # noqa: E402
@@ -71,26 +75,33 @@ import process_cohort  # noqa: E402
 V2_VARIABLES = ("release_lon", "release_lat", "release_depth", "final_lon",
                 "final_lat", "final_depth", "travel_time",
                 "trajectory_path_length")
-DEFAULT_V2 = Path(__file__).resolve().parents[1] / "data"
+RECRUITMENT = Path(__file__).resolve().parents[1]
+DEFAULT_V2 = {"glorys12": RECRUITMENT / "data",
+              "nsidc": RECRUITMENT / "data_nsidc",
+              "glorys12_25km": RECRUITMENT / "data_glorys12_25km"}
 
 
 # --------------------------------------------------------------- regression
 
-def regression(trajectory_path, release_cells_dir, v2_dir):
+def regression(trajectory_path, release_cells_dir, v2_dir,
+               ice_source="glorys12", ice_dir=None):
     started = time.time()
     trajectory_path = Path(trajectory_path)
     v2_path = Path(v2_dir) / trajectory_path.name
-    print(f"== {trajectory_path.name}: regression against {v2_path}")
+    print(f"== {trajectory_path.name}: regression against {v2_path}"
+          + ("" if ice_source == "glorys12" else f", sea ice from {ice_source}"))
     if not v2_path.is_file():
         print("  verdict: FAIL, the v2.0.0 file is missing")
         return False
     no_m3 = dataclasses.replace(classify.BASELINE, m3_temperature=None)
     particle_id, new, info = process_cohort.classify_cohort(
         trajectory_path, release_cells_dir, parameters=no_m3,
-        log=lambda *a: None)
+        log=lambda *a: None, ice_source=ice_source, ice_dir=ice_dir)
     n = particle_id.size
     with xr.open_dataset(v2_path) as ds:
         old = {name: ds[name].values for name in V2_VARIABLES + ("outcome", "particle")}
+        v2_source = ds.attrs.get("sic_source", "not recorded (GLORYS12 in v2.0.0)")
+    print(f"  sea ice of the v2 file: {v2_source}")
 
     reasons = []
     if old["particle"].shape != particle_id.shape:
@@ -149,7 +160,9 @@ def regression(trajectory_path, release_cells_dir, v2_dir):
     # from the monthly files (sea_ice.spawning_sic): the direct test that
     # the release-cell file and the particle-to-cell link reproduce M1.
     glorys_dir = os.environ.get("KRICO_GLORYS12")
-    if glorys_dir:
+    if ice_source != "glorys12":
+        pass
+    elif glorys_dir:
         reference = sea_ice.spawning_sic(
             new["release_lon"], new["release_lat"], info["release_date"],
             glorys_dir).astype(np.float32)
@@ -195,6 +208,7 @@ def report(path):
         n_days = int(nc["ice15_daily"].n_days)
     n = d["outcome"].size
     reasons = []
+    print(f"  sea ice: {attrs.get('sic_source')}")
     print(f"  {n} particles, release {attrs.get('release_date')}, "
           f"code {attrs.get('code_version')} ({str(attrs.get('code_commit'))[:7]}), "
           f"dataset {attrs.get('dataset_version')}")
@@ -301,8 +315,15 @@ def main():
     parser.add_argument("test", choices=("regression", "report"))
     parser.add_argument("files", nargs="+", type=Path,
                         help="trajectory files (regression) or pass 1 files (report)")
-    parser.add_argument("--v2", type=Path, default=DEFAULT_V2, metavar="DIR",
-                        help="folder of the v2.0.0 files (default: recruitment/data)")
+    parser.add_argument("--v2", type=Path, default=None, metavar="DIR",
+                        help="folder of the v2 files (default: recruitment/data, "
+                             "data_nsidc or data_glorys12_25km, by ice source)")
+    parser.add_argument("--ice-source", default="glorys12",
+                        choices=("glorys12", *nsidc_ice.SOURCES),
+                        help="regression: sea ice of the classification")
+    parser.add_argument("--ice-dir", type=Path, default=None,
+                        help="folder of the monthly files of the ice source "
+                             "(default: $KRICO_NSIDC or $KRICO_GLORYS12_25KM)")
     args = parser.parse_args()
     ok = True
     try:
@@ -311,8 +332,16 @@ def main():
             if not directory:
                 sys.exit("ERROR: KRICO_GLORYS12_RELEASE_CELLS environment "
                          "variable not set.")
+            ice_dir = args.ice_dir
+            if args.ice_source != "glorys12" and ice_dir is None:
+                variable = nsidc_ice.SOURCES[args.ice_source]["env"]
+                ice_dir = os.environ.get(variable)
+                if not ice_dir:
+                    sys.exit(f"ERROR: {variable} environment variable not set.")
+            v2_dir = args.v2 or DEFAULT_V2[args.ice_source]
             for path in args.files:
-                ok &= regression(path, directory, args.v2)
+                ok &= regression(path, directory, v2_dir,
+                                 ice_source=args.ice_source, ice_dir=ice_dir)
         else:
             for path in args.files:
                 ok &= report(path)

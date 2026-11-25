@@ -7,6 +7,7 @@ Usage
     python3 check_inputs.py            # the 32 spawning years
     python3 check_inputs.py 1994       # one spawning year
     python3 check_inputs.py 1994 quick # headers and release times only
+    python3 check_inputs.py 1994 nsidc # for a run with another ice source
 
 Every cohort goes through krico_recruitment.inputs.check_cohort, the
 function process_cohort.py calls before it computes anything, so a cohort
@@ -19,7 +20,9 @@ accepted here is accepted by the job:
     day at 12:00, levels down to the deepest hatching depth, and holds the
     spawning day (release minus 24 days) and the release day;
   - every particle has a position at release, and the grid point nearest
-    to it is a cell of the release-cell file (skipped with "quick").
+    to it is a cell of the release-cell file (skipped with "quick");
+  - with nsidc or glorys12_25km: the monthly files of that ice source hold
+    every day from the spawning day to the last tracked day.
 
 The check does not stop at the first problem: every cohort is tested and
 every problem is listed. It also compares the cohorts found with the
@@ -34,6 +37,7 @@ Environment
 -----------
     KRICO_RUNS                     required; KRICO_NNNN folders of trajectories
     KRICO_GLORYS12_RELEASE_CELLS   required
+    KRICO_NSIDC, KRICO_GLORYS12_25KM   monthly files of the other ice sources
 """
 
 import os
@@ -46,7 +50,7 @@ import netCDF4
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from krico_recruitment import inputs, release_cells  # noqa: E402
+from krico_recruitment import inputs, nsidc_ice, release_cells  # noqa: E402
 
 
 def folders(year):
@@ -61,7 +65,8 @@ def expected_days(year):
     return {first + timedelta(days=k) for k in range((last - first).days + 1)}
 
 
-def check_year(year, runs_dir, cells_dir, read_positions):
+def check_year(year, runs_dir, cells_dir, read_positions,
+               ice_source="glorys12", ice_dir=None):
     started = time.time()
     problems, warnings = [], []
     files = []
@@ -71,8 +76,9 @@ def check_year(year, runs_dir, cells_dir, read_positions):
             problems.append(f"folder {path} is missing")
             continue
         files += sorted(path.glob("[0-9][0-9][0-9][0-9]_[0-9][0-9]_[0-9][0-9].nc"))
-    print(f"Spawning year {year}: {len(files)} cohorts in {', '.join(folders(year))}",
-          flush=True)
+    print(f"Spawning year {year}: {len(files)} cohorts in {', '.join(folders(year))}"
+          + ("" if ice_source == "glorys12" else
+             f"; sea ice from {ice_source} in {ice_dir}"), flush=True)
 
     found = {}
     for path in files:
@@ -99,7 +105,8 @@ def check_year(year, runs_dir, cells_dir, read_positions):
     for k, path in enumerate(files, 1):
         try:
             checked = inputs.check_cohort(path, cells_dir, statics=statics,
-                                          read_positions=read_positions)
+                                          read_positions=read_positions,
+                                          ice_source=ice_source, ice_dir=ice_dir)
         except (ValueError, FileNotFoundError, OSError) as exc:
             problems.append(str(exc))
             continue
@@ -143,7 +150,15 @@ def main():
         print(__doc__)
         return
     quick = "quick" in args
-    years = [int(a) for a in args if a != "quick"]
+    sources = [a for a in args if a in nsidc_ice.SOURCES or a == "glorys12"]
+    if len(sources) > 1:
+        sys.exit("give one ice source at most")
+    ice_source = sources[0] if sources else "glorys12"
+    try:
+        years = [int(a) for a in args if a != "quick" and a not in sources]
+    except ValueError:
+        sys.exit("arguments: years, 'quick', and an ice source among glorys12, "
+                 + ", ".join(nsidc_ice.SOURCES))
     for year in years:
         if not release_cells.FIRST_YEAR <= year <= release_cells.LAST_YEAR:
             sys.exit(f"year must be in {release_cells.FIRST_YEAR}-"
@@ -151,14 +166,19 @@ def main():
     if not years:
         years = list(range(release_cells.FIRST_YEAR, release_cells.LAST_YEAR + 1))
     directories = []
-    for name in ("KRICO_RUNS", "KRICO_GLORYS12_RELEASE_CELLS"):
+    names = ["KRICO_RUNS", "KRICO_GLORYS12_RELEASE_CELLS"]
+    if ice_source != "glorys12":
+        names.append(nsidc_ice.SOURCES[ice_source]["env"])
+    for name in names:
         value = os.environ.get(name)
         if not value:
             sys.exit(f"ERROR: {name} environment variable not set.")
         directories.append(Path(value))
+    ice_dir = directories[2] if ice_source != "glorys12" else None
     ok = True
     for year in years:
-        ok &= check_year(year, directories[0], directories[1], not quick)
+        ok &= check_year(year, directories[0], directories[1], not quick,
+                         ice_source=ice_source, ice_dir=ice_dir)
     print("Check passed." if ok else "CHECK FAILED.")
     sys.exit(0 if ok else 1)
 

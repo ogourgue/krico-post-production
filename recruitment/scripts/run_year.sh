@@ -42,7 +42,14 @@
 #   sbatch --array=1 run_year.sh data_v3.0_glorys12     # 1994, as a test
 #   sbatch --array=2-32 run_year.sh data_v3.0_glorys12  # the rest
 #
-# Requires KRICO_RUNS and KRICO_GLORYS12_RELEASE_CELLS.
+# A second word names another ice source (the ice-source test: see
+# process_cohort.py); each source has its own folder:
+#   mkdir -p ../data_v3.0_nsidc ../data_v3.0_glorys12_25km
+#   sbatch run_year.sh data_v3.0_nsidc nsidc
+#   sbatch run_year.sh data_v3.0_glorys12_25km glorys12_25km
+#
+# Requires KRICO_RUNS and KRICO_GLORYS12_RELEASE_CELLS, and KRICO_NSIDC or
+# KRICO_GLORYS12_25KM for the other ice sources.
 # ============================================================================
 
 set -euo pipefail
@@ -75,6 +82,27 @@ if [[ ! -d "${DATA_DIR}" ]]; then
     exit 1
 fi
 
+# Ice source, and the folder that must go with it: a classification with
+# one sea ice can never be written into the folder of another.
+ICE_SOURCE="${2:-glorys12}"
+case "${ICE_SOURCE}" in
+    glorys12)       ICE_ENV="" ;;
+    nsidc)          ICE_ENV="KRICO_NSIDC" ;;
+    glorys12_25km)  ICE_ENV="KRICO_GLORYS12_25KM" ;;
+    *)
+        echo "ERROR: unknown ice source '${ICE_SOURCE}' (glorys12, nsidc or glorys12_25km)" >&2
+        exit 1
+        ;;
+esac
+if [[ "${FOLDER}" != *"_${ICE_SOURCE}" ]]; then
+    echo "ERROR: the output folder must end in _${ICE_SOURCE} for ice source ${ICE_SOURCE}." >&2
+    exit 1
+fi
+if [[ -n "${ICE_ENV}" && -z "${!ICE_ENV:-}" ]]; then
+    echo "ERROR: ${ICE_ENV} environment variable not set." >&2
+    exit 1
+fi
+
 # ----------------------------------------------------------------------------
 # Resolve spawning year and the four simulation folders that feed it
 # ----------------------------------------------------------------------------
@@ -94,6 +122,7 @@ echo "Array task: ${YEAR_INDEX}/32"
 echo "Folders: ${FOLDERS[*]}"
 echo "Trajectory input: ${KRICO_RUNS}"
 echo "Release-cell input: ${KRICO_GLORYS12_RELEASE_CELLS}"
+echo "Sea ice: ${ICE_SOURCE}${ICE_ENV:+ (${!ICE_ENV})}"
 echo "Output: ${DATA_DIR}"
 echo "Script: ${SCRIPT}"
 echo "================================================================"
@@ -136,7 +165,8 @@ for folder in "${FOLDERS[@]}"; do
         fi
 
         echo "  [run]  ${basename}"
-        if python3 -u "${SCRIPT}" "${cohort_file}" "${output_file}"; then
+        if python3 -u "${SCRIPT}" "${cohort_file}" "${output_file}" \
+                   --ice-source "${ICE_SOURCE}"; then
             n_processed=$((n_processed + 1))
         else
             echo "  [FAIL] ${basename}" >&2
