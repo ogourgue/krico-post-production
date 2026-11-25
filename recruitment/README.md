@@ -34,7 +34,7 @@ recruitment/
 │   ├── preprocess_glorys12_25km.py / .sh  # GLORYS12 ice binned onto the NSIDC grid
 │   ├── preprocess_glorys12_release_cells.py / .sh  # GLORYS12 ice and temperature at the release cells
 │   ├── glorys12_release_cells.csv # The 35,303 release cells (grid indices, position, depth)
-│   ├── validate_glorys12_release_cells.py  # Acceptance tests of that extraction
+│   ├── validate_glorys12_release_cells.py / .sh  # Acceptance tests of that extraction
 │   ├── validate_nsidc.py          # NSIDC vs GLORYS12 ice readings on given cohorts
 │   ├── validate_nsidc.csv         # The four-cohort validation behind run_year_nsidc.sh
 │   ├── outcome_distribution.py    # Dataset-wide outcome tally
@@ -163,14 +163,17 @@ The rules that act before release, in the 24 days that are not simulated, depend
 
 ```bash
 cd scripts && mkdir -p logs
-python3 preprocess_glorys12_release_cells.py --check        # inputs of the 32 years, no output
-sbatch --array=1 preprocess_glorys12_release_cells.sh       # spawning year 1994, as a test
-python3 validate_glorys12_release_cells.py --releases ../data \
-    $KRICO_RUNS/KRICO_0001/1993_11_15.nc                    # acceptance tests
-sbatch --array=2-32 preprocess_glorys12_release_cells.sh    # the other years
+python3 preprocess_glorys12_release_cells.py --check             # inputs of the 32 years, no output
+sbatch validate_glorys12_release_cells.sh --releases ../data     # acceptance test 1, coverage
+sbatch --array=1 preprocess_glorys12_release_cells.sh            # spawning year 1994, as a test
+sbatch validate_glorys12_release_cells.sh \
+    $KRICO_RUNS/KRICO_0001/1993_11_15.nc \
+    $KRICO_RUNS/KRICO_0003/1994_01_15.nc \
+    $KRICO_RUNS/KRICO_0004/1994_03_14.nc                         # acceptance test 2, day 0
+sbatch --array=2-32 preprocess_glorys12_release_cells.sh         # the other years
 ```
 
-`validate_glorys12_release_cells.py` runs two tests. Coverage (`--releases`): the nearest grid point of every release position of the dataset is among the extracted cells. Day 0 (trajectory files): the sea ice and temperature a trajectory recorded at its release equal the extraction on the release day, at the cell and level holding the particle; Parcels samples tracers on the C-grid without spatial interpolation and particles are released at 12:00, the time stamp of the daily means, so the comparison is exact, and comparisons shifted by a day or a level must be worse.
+`validate_glorys12_release_cells.py` runs two tests, whose reports are the job outputs `logs/cells_val_<job id>.out`. Coverage (`--releases`): the nearest grid point of every release position of the dataset is among the extracted cells. Day 0 (trajectory files): the sea ice and temperature a trajectory recorded at its release equal the extraction on the release day, at the cell and level holding the particle; Parcels samples tracers on the C-grid without spatial interpolation and particles are released at 12:00, the time stamp of the daily means, so the comparison is exact, and comparisons shifted by a day or a level must be worse.
 
 Every file records the commit that produced it (`code_commit`, `code_version`); the extraction stops if the code is modified, untracked or not pushed.
 
