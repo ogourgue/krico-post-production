@@ -47,6 +47,12 @@ Analyses that evaluate conditions outside the tracking window also require the G
 export KRICO_GLORYS12="/path/to/Pre/GLORYS12"      # e.g., /scratch/cvan/KRICO/Pre/GLORYS12
 ```
 
+The rules that act before release read GLORYS12 sea ice and temperature extracted at the release cells; `KRICO_GLORYS12_RELEASE_CELLS` names the directory of that extraction, which is built from the fields above (see [recruitment/](recruitment/)):
+
+```bash
+export KRICO_GLORYS12_RELEASE_CELLS="/path/to/Pre/GLORYS12_RELEASE_CELLS"   # e.g., /scratch/cvan/KRICO/Pre/GLORYS12_RELEASE_CELLS
+```
+
 Add these lines to your shell configuration file (e.g. `~/.bash_profile`, `~/.bashrc`, or `~/.zshrc`) to make them persistent across sessions. See each analysis subfolder's README for which variables are required. The same variable names are used by [krico-paper1](https://github.com/ogourgue/krico-paper1).
 
 The raw trajectory data are not currently publicly archived due to storage constraints. They are available on demand for the duration of the KRICO project (until end of 2026), after which public archiving will be revisited. The GLORYS12v1 fields are a Copernicus Marine product and are obtained separately; see [krico-templates](https://github.com/ogourgue/krico-templates) for the download scripts.

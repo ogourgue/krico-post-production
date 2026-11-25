@@ -18,7 +18,9 @@ recruitment/
 │   ├── trajectory.py              # Path length, pick-at-day utilities
 │   ├── io.py                      # NetCDF read / write
 │   ├── nsidc_grid.py              # NSIDC 25 km polar-stereographic grid geometry
-│   └── nsidc_ice.py               # NSIDC sea ice at spawning and along trajectories
+│   ├── nsidc_ice.py               # NSIDC sea ice at spawning and along trajectories
+│   ├── release_cells.py           # Release cells on the GLORYS12 grid, particle-to-cell link
+│   └── provenance.py              # Commit and version written into the output files
 ├── scripts/
 │   ├── process_cohort.py          # Single-cohort orchestration script
 │   ├── run_year.sh                # SLURM array driver (1 task per spawning year)
@@ -30,6 +32,9 @@ recruitment/
 │   ├── download_globcolour.py / .sh  # Daily chlorophyll climatology of GlobColour (Copernicus Marine toolbox)
 │   ├── preprocess_nsidc.py / .sh  # Daily files -> monthly stacks on the native grid
 │   ├── preprocess_glorys12_25km.py / .sh  # GLORYS12 ice binned onto the NSIDC grid
+│   ├── preprocess_glorys12_release_cells.py / .sh  # GLORYS12 ice and temperature at the release cells
+│   ├── glorys12_release_cells.csv # The 35,303 release cells (grid indices, position, depth)
+│   ├── validate_glorys12_release_cells.py  # Acceptance tests of that extraction
 │   ├── validate_nsidc.py          # NSIDC vs GLORYS12 ice readings on given cohorts
 │   ├── validate_nsidc.csv         # The four-cohort validation behind run_year_nsidc.sh
 │   ├── outcome_distribution.py    # Dataset-wide outcome tally
@@ -146,6 +151,28 @@ Then `sbatch run_year_nsidc.sh` runs the classification into `data_nsidc/`, with
 A third classification separates resolution from product in the comparison: `preprocess_glorys12_25km.py` bins the GLORYS12 monthly ice onto the NSIDC grid (plain mean of the ORCA12 cells inside each 25 km cell, NSIDC land/coast/lake as fill) into `$KRICO_GLORYS12_25KM`, and `run_year_glorys12_25km.sh` runs the classification on it through the same sampler (`--ice-source glorys12_25km`) into `data_glorys12_25km/`, with `sic_source = "GLORYS12v1 ice binned onto the NSIDC G02202 25 km grid"`. Native GLORYS12 minus this run is the resolution and sampling effect; this run minus NSIDC is the product difference at equal resolution. On the full record the resolution effect is at or below 0.1 percentage points for every outcome domain-wide, so the whole GLORYS12-versus-NSIDC difference is in the ice values.
 
 Sampling reads the 25 km cell containing each position, with no interpolation (`krico_recruitment/nsidc_ice.py`). Coast and land cells are fill in the CDR and read NaN, which the filters treat as below threshold; a nearest-ocean redirection exists (`--nsidc-nearest-ocean`) but is not used, because on four cohorts spanning the record coast cells hold 0.3-0.4% of positions and move M1 by at most 0.4 points. On those cohorts the two readings agree along trajectories to r = 0.97-0.98 and a mean absolute difference of 0.035-0.044 in concentration, M1 differs by 2-4 points in either direction, and advance detection by under 1 point (`scripts/validate_nsidc.csv`). The 2.2% of release positions north of the NSIDC grid edge (50-51°S, 8°W-7°E, in 48.6N) read NaN and get the same outcome in both products, since neither has ice there.
+
+## Release-cell extraction (GLORYS12 sea ice and temperature)
+
+The rules that act before release, in the 24 days that are not simulated, depend only on the date and on the grid cell of the release position. Their inputs are extracted once, without reading any trajectory: `preprocess_glorys12_release_cells.py` copies the daily GLORYS12 sea-ice concentration and the temperature column at the release cells into one file per spawning year, `$KRICO_GLORYS12_RELEASE_CELLS/glorys12_release_cells_YYYY.nc` (e.g. `/scratch/cvan/KRICO/Pre/GLORYS12_RELEASE_CELLS`). The files are an intermediate product, like the trajectories and the forcing: they are not part of the published dataset. The extraction evaluates no rule.
+
+- **Cells:** the 35,303 cells in which `run.py` of krico-templates releases particles (`scripts/glorys12_release_cells.csv`: sea floor of 1000 to 2000 m, centre inside CCAMLR subareas 48.1 to 48.6 and 88.3) and their eight neighbours, 55,034 cells. A particle is linked to the grid point nearest to its release position, the sampling rule of M1, and that point can be a neighbour of the cell the particle was generated in (`krico_recruitment/release_cells.py`). The table was built in [krico-paper2](https://github.com/ogourgue/krico-paper2) (`local/subarea/raw/spawning_cells.csv`, sha256 `6c4f0e01f954…`) and reproduces the 546,199 particles generated per release day.
+- **Period:** 22 October (first spawning date) to 30 September (last tracked day) of each spawning year, daily.
+- **Levels:** surface to the sea floor of the deepest release cell, 40 levels; the level bounds (`depthw`) are stored with them.
+- **Values:** copied unchanged as float32, with lossless compression.
+
+```bash
+cd scripts && mkdir -p logs
+python3 preprocess_glorys12_release_cells.py --check        # inputs of the 32 years, no output
+sbatch --array=1 preprocess_glorys12_release_cells.sh       # spawning year 1994, as a test
+python3 validate_glorys12_release_cells.py --releases ../data \
+    $KRICO_RUNS/KRICO_0001/1993_11_15.nc                    # acceptance tests
+sbatch --array=2-32 preprocess_glorys12_release_cells.sh    # the other years
+```
+
+`validate_glorys12_release_cells.py` runs two tests. Coverage (`--releases`): the nearest grid point of every release position of the dataset is among the extracted cells. Day 0 (trajectory files): the sea ice and temperature a trajectory recorded at its release equal the extraction on the release day, at the cell and level holding the particle; Parcels samples tracers on the C-grid without spatial interpolation and particles are released at 12:00, the time stamp of the daily means, so the comparison is exact, and comparisons shifted by a day or a level must be worse.
+
+Every file records the commit that produced it (`code_commit`, `code_version`); the extraction stops if the code is modified, untracked or not pushed.
 
 ## Archiving (project maintainer)
 
