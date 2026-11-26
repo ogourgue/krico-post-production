@@ -249,6 +249,7 @@ class Model:
         self.directory = Path(directory)
         self._month = (None, None, None)      # (year, month), dataset, days
         self._loaded = (None, 0, None)        # day, levels read, fields
+        self._known = {}                      # (year, month) -> days it holds
         self.lat = self.lon = self.depth = None
 
     def close(self):
@@ -306,12 +307,18 @@ class Model:
                 nc.close()
                 raise
             self._month = ((year, month), nc, {d: k for k, (_, _, d) in enumerate(days)})
+            self._known[(year, month)] = frozenset(self._month[2])
         return self._month[1], self._month[2]
 
     def check_day(self, day):
-        """Raise unless the monthly file of `day` exists and holds it."""
-        _, days = self._open(day.year, day.month)
-        if day.day not in days:
+        """
+        Raise unless the monthly file of `day` exists, is on the grid of
+        the others and holds that day. A month is opened and checked once.
+        """
+        key = (day.year, day.month)
+        if key not in self._known:
+            self._open(*key)
+        if day.day not in self._known[key]:
             raise ValueError(
                 f"{MODEL_PATTERN.format(year=day.year, month=day.month)}: "
                 f"no record for {day}")
@@ -320,7 +327,7 @@ class Model:
         """The first `levels` levels of a calendar day, float32, NaN where none."""
         if self._loaded[0] != day or self._loaded[1] < levels:
             self.check_day(day)
-            nc, days = self._month[1], self._month[2]
+            nc, days = self._open(day.year, day.month)
             a = np.asarray(nc[MODEL_VARIABLE][days[day.day], :levels],
                            dtype=np.float32)
             with np.errstate(invalid="ignore"):
@@ -334,7 +341,7 @@ class Model:
         the level holding each depth, and the mean from the surface to
         LAYER_DEPTH. NaN where the model has no value.
         """
-        self.check_day(day)
+        self.check_day(day)                   # also sets the grid, once
         row, in_lat = self.lat.index(lat)
         col, in_lon = self.lon.index(lon)
         inside = in_lat & in_lon

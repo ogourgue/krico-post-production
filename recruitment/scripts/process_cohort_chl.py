@@ -59,13 +59,13 @@ def open_products(satellite_dir, model_dir):
     return chlorophyll.Satellite(satellite_dir), chlorophyll.Model(model_dir)
 
 
-def check(input_path, satellite, model, read_positions=True):
+def check(input_path, satellite, model):
     """
     The checks made before anything is computed, shared with
-    check_inputs_chl.py: the trajectory file, and both products over the
-    201 days of the cohort.
+    check_inputs_chl.py: the trajectory file (headers and release time),
+    and both products over the 201 days of the cohort.
     """
-    checked = inputs.check_trajectory(input_path, read_positions=read_positions)
+    checked = inputs.check_trajectory(input_path, read_positions=False)
     chlorophyll.check_inputs(satellite, model, checked["release_day"],
                              checked["n_obs"])
     return checked

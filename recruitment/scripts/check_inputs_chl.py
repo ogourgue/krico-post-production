@@ -23,12 +23,11 @@ here is accepted by the job:
 The check does not stop at the first problem: every cohort is tested and
 every problem is listed. It also compares the cohorts found with the
 release days expected for the year (15 November to 14 March), as
-check_inputs.py does, and reports the share of release positions that
-fall on a cell of each grid, as information: a position outside a grid
-reads no value and stops nothing.
+check_inputs.py does.
 
-Only headers, time axes and release positions are read: a year takes well
-under a minute.
+Only headers, time axes and release times are read, but every cohort
+file is opened: run whole years through check_inputs_chl.sh rather than on
+a login node.
 
 Environment
 -----------
@@ -75,8 +74,8 @@ def check_year(year, runs_dir, satellite, model):
         warnings.append(f"{found[day].parent.name}/{found[day].name} is outside "
                         "the release season of the year")
 
-    accepted = particles = on_satellite = on_model = 0
-    for path in files:
+    accepted = particles = 0
+    for k, path in enumerate(files, 1):
         try:
             checked = process_cohort_chl.check(path, satellite, model)
         except (ValueError, FileNotFoundError, OSError) as exc:
@@ -84,18 +83,10 @@ def check_year(year, runs_dir, satellite, model):
             continue
         accepted += 1
         particles += checked["n_particles"]
-        for grid, name in ((satellite, "satellite"), (model, "model")):
-            inside = grid.lat.index(checked["lat"])[1] & grid.lon.index(checked["lon"])[1]
-            if name == "satellite":
-                on_satellite += int(inside.sum())
-            else:
-                on_model += int(inside.sum())
+        if k % 20 == 0:
+            print(f"  {k} cohorts, {time.time() - started:.0f} s", flush=True)
 
     print(f"  accepted: {accepted} of {len(files)} cohorts, {particles} particles")
-    if particles:
-        print(f"  release positions on the satellite grid: "
-              f"{100 * on_satellite / particles:.3f}%; on the model grid: "
-              f"{100 * on_model / particles:.3f}%")
     for line in warnings:
         print(f"  WARNING: {line}")
     for line in problems:

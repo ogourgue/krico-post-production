@@ -339,7 +339,7 @@ sbatch validate_pass2.sh cohort $KRICO_RUNS/KRICO_0003/1994_01_15.nc data_v3.0_c
 sbatch validate_pass2.sh report ../data_v3.0_chl/1994_01_15.nc
 ```
 
-- `check_inputs_chl` runs on every cohort the checks the job itself applies: the trajectory file, the 366 days of the climatology, and the model files of the 201 days of the cohort. It lists every problem.
+- `check_inputs_chl` runs on every cohort the checks the job itself applies: the trajectory file (headers and release time), the 366 days of the climatology, and the model files of the 201 days of the cohort. It lists every problem.
 - `cohort` writes one file into a test folder and reports on it; `report` does the same on files already written. The report holds:
   - consistency of the numbers of days and of the means, on every particle;
   - the two window bounds against the pass 1 file in `data_v3.0_glorys12/`, for every particle;
