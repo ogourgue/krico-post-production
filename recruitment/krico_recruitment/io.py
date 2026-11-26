@@ -5,6 +5,8 @@ NetCDF I/O for the recruitment pipeline.
 - write_classification_file: save the per-particle outcome and diagnostics
   of one cohort (dataset v3.0.0).
 - read_diagnostics: read them back in the form classify.outcome expects.
+- write_chlorophyll_file: save the chlorophyll indices of one cohort (pass
+  2 of dataset v3.0.0; layout in the docstring of the function).
 
 Layout of a v3.0.0 file
 -----------------------
@@ -44,8 +46,8 @@ import netCDF4
 import numpy as np
 import xarray as xr
 
-from krico_recruitment import (classify, development, filters, pre_release,
-                               sea_ice)
+from krico_recruitment import (chlorophyll, classify, development, filters,
+                               pre_release, sea_ice)
 from krico_recruitment.outcome import OUTCOME_MEANINGS
 
 DATASET_VERSION = "3.0.0"
@@ -342,3 +344,156 @@ def read_diagnostics(path):
         "ice_thresholds": tuple(float(t) for t in d.pop("ice_threshold")),
     }
     return d, coordinates
+
+
+def _chlorophyll_schema():
+    """Variables of a pass 2 file, in order: name -> (type, dims, attributes)."""
+    pw = ("particle", "window")
+    pwc = ("particle", "window", "min_count")
+    chl = {**_NAN, "units": "mg m-3",
+           "significant_bits": np.int32(chlorophyll.SIGNIFICANT_BITS),
+           "rounding": "rounded to significant_bits significant binary "
+                       "digits: relative error at most 2**-significant_bits"}
+    mean = "mean over the days of the window that hold a value"
+    satellite = ("; a day holds a value when the climatological mean and "
+                 "median both exist at the position on that day of the year "
+                 "and rest on at least min_count observations (CHL_count)")
+    return {
+        "calyptopis_end_day": ("u1", ("particle",), {
+            **_DAY, "long_name": "first day at furcilia I or beyond; none if "
+                                 "not reached within tracking",
+            "comment": _DAY["comment"] + "; as in the pass 1 file of the "
+                       "cohort; end of the calyptopis window and start of "
+                       "the furcilia window"}),
+        "advance_day": ("u1", ("particle",), {
+            **_DAY,
+            "long_name": "sea-ice advance: first day of the first run of "
+                         "consecutive days with sea ice above the threshold, "
+                         "from the opening date; none if no advance while "
+                         "the particle is tracked",
+            "sic_threshold": sea_ice.ADVANCE_SIC_THRESHOLD,
+            "consecutive_days": np.int32(sea_ice.ADVANCE_MIN_CONSECUTIVE_DAYS),
+            "opening_date": "1 April",
+            "comment": _DAY["comment"] + "; as in the pass 1 file of the "
+                       "cohort with GLORYS12 sea ice; end of the furcilia "
+                       "window"}),
+        "window_days": ("u1", pw, {
+            "units": "day",
+            "long_name": "days of the window on which the particle has a "
+                         "position"}),
+        "chl_satellite_mean": ("f4", pwc, {
+            **chl, "long_name": "satellite climatology of surface "
+                                "chlorophyll, climatological mean: " + mean,
+            "comment": mean + satellite}),
+        "chl_satellite_median": ("f4", pwc, {
+            **chl, "long_name": "satellite climatology of surface "
+                                "chlorophyll, climatological median: " + mean,
+            "comment": mean + satellite}),
+        "chl_satellite_days": ("u1", pwc, {
+            "units": "day",
+            "long_name": "days of the window on which the satellite "
+                         "climatology holds a value"}),
+        "chl_model_surface": ("f4", pw, {
+            **chl, "long_name": "model chlorophyll at the first level: " + mean}),
+        "chl_model_mean_200m": ("f4", pw, {
+            **chl,
+            "long_name": f"model chlorophyll, mean of the top "
+                         f"{chlorophyll.LAYER_DEPTH:.0f} m: " + mean,
+            "cell_methods_comment": "thickness-weighted mean over the model "
+                                    "levels, cut at the sea floor of the "
+                                    "model; level bounds taken midway "
+                                    "between the level depths"}),
+        "chl_model_days": ("u1", pw, {
+            "units": "day",
+            "long_name": "days of the window on which the model holds a "
+                         "value at the position (chl_model_surface and "
+                         "chl_model_mean_200m)"}),
+        "chl_model_at_depth": ("f4", pw, {
+            **chl, "long_name": "model chlorophyll at the level holding the "
+                                "depth of the particle: " + mean}),
+        "chl_model_at_depth_days": ("u1", pw, {
+            "units": "day",
+            "long_name": "days of the window on which the model holds a "
+                         "value at the position and depth of the particle"}),
+        "chl_model_surface_matched": ("f4", pwc, {
+            **chl,
+            "long_name": "model chlorophyll at the first level, on the days "
+                         "counted in chl_matched_days",
+            "comment": "to compare the two products on the same days: where "
+                       "chl_matched_days equals chl_satellite_days, this "
+                       "mean and the satellite means cover the same days"}),
+        "chl_matched_days": ("u1", pwc, {
+            "units": "day",
+            "long_name": "days of the window on which the satellite "
+                         "climatology and the model both hold a value"}),
+    }
+
+
+def chlorophyll_variable_names():
+    """Names of the variables of a pass 2 file, in order."""
+    return list(_chlorophyll_schema())
+
+
+def write_chlorophyll_file(path, particle_id, variables, attributes):
+    """
+    Write the chlorophyll indices of one cohort (pass 2 of dataset v3.0.0).
+
+    Layout: dimensions particle, window (calyptopis, furcilia) and
+    min_count (minimum number of observations behind a satellite value).
+    Particles are in the order of the trajectory file, which is that of
+    the pass 1 file of the cohort; calyptopis_end_day and advance_day
+    repeat the two pass 1 variables that bound the windows.
+
+    The file is written under a temporary name and renamed when complete.
+    """
+    path = Path(path)
+    schema = _chlorophyll_schema()
+    missing = set(schema) - set(variables)
+    extra = set(variables) - set(schema)
+    if missing or extra:
+        raise ValueError(f"variables do not match the schema: missing "
+                         f"{sorted(missing)}, unexpected {sorted(extra)}")
+    n = particle_id.size
+    sizes = {"particle": n, "window": len(chlorophyll.WINDOWS),
+             "min_count": len(chlorophyll.MIN_COUNTS)}
+    tmp = path.with_name(path.name + ".part")
+    with netCDF4.Dataset(tmp, "w", format="NETCDF4") as nc:
+        for name, size in sizes.items():
+            nc.createDimension(name, size)
+        v = nc.createVariable("particle", "i8", ("particle",), zlib=True,
+                              shuffle=True, complevel=COMPLEVEL)
+        v.long_name = "particle identifier, as in the trajectory file"
+        v[:] = np.asarray(particle_id, dtype=np.int64)
+        v = nc.createVariable("window", "i1", ("window",))
+        v.long_name = "period of the larva's life the mean is taken over"
+        v.flag_values = np.arange(len(chlorophyll.WINDOWS), dtype=np.int8)
+        v.flag_meanings = " ".join(chlorophyll.WINDOWS)
+        v.comment = ("calyptopis: day 0 to the day before calyptopis_end_day "
+                     "(the whole track if none); furcilia: calyptopis_end_day "
+                     "to the day before advance_day (to the end of tracking "
+                     "if no advance), empty if the advance comes first or if "
+                     "furcilia I is not reached")
+        v[:] = np.arange(len(chlorophyll.WINDOWS), dtype=np.int8)
+        v = nc.createVariable("min_count", "i2", ("min_count",))
+        v.long_name = ("minimum number of observations behind a value of the "
+                       "satellite climatology (CHL_count); 1 is no minimum")
+        v.units = "1"
+        v[:] = np.asarray(chlorophyll.MIN_COUNTS, dtype=np.int16)
+        for name, (dtype, dims, attrs) in schema.items():
+            values = np.asarray(variables[name])
+            shape = tuple(sizes[d] for d in dims)
+            if values.shape != shape:
+                raise ValueError(f"{name}: shape {values.shape}, expected {shape}")
+            if values.dtype != np.dtype(dtype):
+                raise ValueError(f"{name}: type {values.dtype}, expected {dtype}")
+            attrs = dict(attrs)
+            v = nc.createVariable(name, dtype, dims, zlib=True, shuffle=True,
+                                  complevel=COMPLEVEL, chunksizes=shape,
+                                  fill_value=attrs.pop("_FillValue", None))
+            v.set_auto_maskandscale(False)
+            v.setncatts(attrs)
+            v[:] = values
+        nc.Conventions = "CF-1.7"
+        nc.title = "KRICO per-particle chlorophyll indices"
+        nc.setncatts(attributes)
+    os.replace(tmp, path)

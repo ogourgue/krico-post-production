@@ -4,7 +4,7 @@ Per-particle recruitment post-processing for the KRICO Lagrangian trajectory dat
 
 Reads one Parcels trajectory NetCDF per release-day cohort and produces a per-particle NetCDF following the Thorpe et al. (2019) framework: the outcome of each particle, one of nine mutually exclusive states, and the diagnostics the outcome is derived from.
 
-> **State of this branch.** The code is that of dataset **v3.0.0**, in production: [pass 0](#release-cell-extraction-glorys12-sea-ice-and-temperature) (inputs at the release cells) and [pass 1](#dataset-v300-pass-1) (the classification) are written; pass 2 (chlorophyll) is not. The published dataset is still v2.0.0, which the tag `v2.0.1` produces; sections that describe it say so.
+> **State of this branch.** The code is that of dataset **v3.0.0**, in production: [pass 0](#release-cell-extraction-glorys12-sea-ice-and-temperature) (inputs at the release cells) and [pass 1](#dataset-v300-pass-1) (the classification) are written and run; [pass 2](#dataset-v300-pass-2-chlorophyll) (chlorophyll) is written and tested on synthetic files, not yet run on the trajectories. The published dataset is still v2.0.0, which the tag `v2.0.1` produces; sections that describe it say so.
 
 ## Layout
 
@@ -19,9 +19,10 @@ recruitment/
 │   ├── pre_release.py             # Before release: sea ice at spawning, M3 temperatures, from the release cells
 │   ├── classify.py                # Diagnostics along the trajectory, outcome from the diagnostics
 │   ├── inputs.py                  # Checks of the inputs of one cohort
+│   ├── chlorophyll.py             # Pass 2: chlorophyll along the trajectories, two products
 │   ├── sea_ice.py                 # Sea-ice at spawning, advance detection, censoring
 │   ├── trajectory.py              # Path length, pick-at-day utilities
-│   ├── io.py                      # NetCDF read / write, schema of the v3.0.0 files
+│   ├── io.py                      # NetCDF read / write, schema of the v3.0.0 files (pass 1 and pass 2)
 │   ├── nsidc_grid.py              # NSIDC 25 km polar-stereographic grid geometry
 │   ├── nsidc_ice.py               # NSIDC sea ice at spawning and along trajectories
 │   ├── release_cells.py           # Release cells on the GLORYS12 grid, particle-to-cell link
@@ -31,6 +32,10 @@ recruitment/
 │   ├── run_year.sh                # SLURM array driver (1 task per spawning year; any ice source)
 │   ├── check_inputs.py / .sh      # Inputs of pass 1, checked for every cohort before submission
 │   ├── validate_pass1.py / .sh    # Regression against v2.0.0, report on written files
+│   ├── process_cohort_chl.py      # Pass 2: chlorophyll indices of one cohort
+│   ├── run_year_chl.sh            # SLURM array driver of pass 2 (1 task per spawning year)
+│   ├── check_inputs_chl.py / .sh  # Inputs of pass 2, checked for every cohort before submission
+│   ├── validate_pass2.py / .sh    # Tests of the pass 2 files, with an independent recomputation
 │   ├── download_nsidc.py / .sh    # Daily NSIDC G02202 v6 files (Python + SLURM array)
 │   ├── nsidc_daily_provenance.txt # DOI, URL, access date, sha256 of every daily file
 │   ├── download_pisces.py / .sh   # Daily 3D chlorophyll of the PISCES hindcast (Copernicus Marine toolbox)
@@ -51,6 +56,7 @@ recruitment/
 ├── data_v3.0_glorys12/            # Pass 1 outputs, v3.0.0 (gitignored)
 ├── data_v3.0_nsidc/               # Same, with NSIDC sea ice (see Ice-source test)
 ├── data_v3.0_glorys12_25km/       # Same, with GLORYS12 ice on the NSIDC grid
+├── data_v3.0_chl/                 # Pass 2 outputs, v3.0.0 (gitignored)
 ├── data_nsidc/                    # Recruitment outputs with NSIDC sea ice (gitignored)
 ├── data_glorys12_25km/            # Same, with GLORYS12 ice on the NSIDC grid (gitignored)
 └── archives/                      # Spawning-year tar.gz archives (gitignored)
@@ -267,6 +273,80 @@ sbatch validate_pass1.sh cohort $KRICO_RUNS/KRICO_0001/1993_11_15.nc data_v3.0_t
 - `check_inputs` runs on every cohort the checks the job itself applies, and lists every problem.
 - `regression` classifies a cohort in memory with M3 off and requires the v2.0.0 file in `recruitment/data/`: the outcome through the code table, the eight other variables value for value. With `KRICO_GLORYS12` set it also compares the sea ice at spawning with the monthly files. It then reports what M3 removes.
 - `cohort` writes one file into a test folder and reports on it: outcome recomputed from the stored diagnostics, cross-checks between diagnostics, bytes on disk per variable, run time and peak memory.
+
+## Dataset v3.0.0: pass 2, chlorophyll
+
+Pass 2 (`process_cohort_chl.py`) reads one trajectory file and two chlorophyll products, and writes one file per cohort into `recruitment/data_v3.0_chl/`. Chlorophyll is a diagnostic of the food a larva had around it: no outcome depends on it, and every particle has its indices, whatever its outcome. The pass 1 files are neither read nor changed.
+
+### Products
+
+| | Satellite climatology | Model hindcast |
+|---|---|---|
+| Product | Copernicus-GlobColour, `OCEANCOLOUR_GLO_BGC_L4_MY_009_104`, doi:10.48670/moi-00281 | PISCES, `GLOBAL_MULTIYEAR_BGC_001_029`, doi:10.48670/moi-00019 (no data assimilation) |
+| Download | `download_globcolour.py`, into `$KRICO_GLOBCOLOUR` | `download_pisces.py`, into `$KRICO_PISCES` |
+| Grid | 1/24°, surface | 1/4°, 75 levels |
+| Read | by day of the year (366 daily fields) | on the actual date |
+| Limits | describes 1999–2018, each day smoothed over 11 days; no value under sea ice or in the dark | its ocean and sea ice are those of its own free run, not GLORYS12 |
+
+Each satellite value comes with the number of observations behind it (`CHL_count`, at most 220). South of 65°S that number is small even in summer, so every satellite index is given twice: with no minimum, and counting only the days whose value rests on at least 10 observations.
+
+### Windows
+
+| Window | Days |
+|---|---|
+| `calyptopis` | From release (day 0) to the day before `calyptopis_end_day`, the first day at furcilia I: the days M4 looks at. The whole track if furcilia I is not reached |
+| `furcilia` | From `calyptopis_end_day` to the day before `advance_day`, the sea-ice advance; to the end of tracking if there is no advance. Empty if the advance comes during the calyptopis stages or if furcilia I is not reached |
+
+The two bounds are computed from the trajectory by `classify.trajectory_diagnostics`, the function that computes them in pass 1, with the sea ice of the trajectory file (GLORYS12). They are written in the pass 2 file, and `validate_pass2.py` compares them with the pass 1 file. Only days on which the particle has a position count.
+
+### Indices
+
+Each index is the arithmetic mean over the days of the window that hold a value, stored with the number of those days.
+
+- **Sampling:** the value of the cell holding the position (the nearest grid point), with no interpolation and no filling from neighbours, as Parcels reads a tracer. A position outside the grid, on a land cell or below the sea floor of the model reads no value.
+- **Model levels:** the files carry no level bounds; they are taken midway between the level depths, so the level holding a depth is the nearest one. The mean of the top 200 m is weighted by thickness and cut at the sea floor of the model.
+- **Rounding:** means are stored as float32 rounded to 7 significant binary digits, a relative error of at most 0.8%, far below the uncertainty of either product, for about a third of the size (`chlorophyll.round_bits`; attribute `significant_bits`).
+
+### Variables
+
+Dimensions: `particle`; `window` (0 `calyptopis`, 1 `furcilia`); `min_count` (1, 10). Particles are in the order of the trajectory file, which is that of the pass 1 file.
+
+| Variable | Dimensions | Content |
+|---|---|---|
+| `calyptopis_end_day`, `advance_day` | particle | The two bounds, as in pass 1 (uint8, 255 for none) |
+| `window_days` | particle, window | Days of the window on which the particle has a position |
+| `chl_satellite_mean`, `chl_satellite_median` | particle, window, min_count | Mean of the climatological mean, and of the climatological median, over the days on which both exist and rest on at least `min_count` observations |
+| `chl_satellite_days` | particle, window, min_count | Number of those days |
+| `chl_model_surface`, `chl_model_mean_200m` | particle, window | Model at the first level (0.5 m), and mean of the top 200 m |
+| `chl_model_days` | particle, window | Days on which the model holds a value at the position |
+| `chl_model_at_depth` | particle, window | Model at the level holding the particle's depth |
+| `chl_model_at_depth_days` | particle, window | Days on which it holds a value there |
+| `chl_model_surface_matched` | particle, window, min_count | Model at the first level on the days counted in `chl_matched_days` |
+| `chl_matched_days` | particle, window, min_count | Days on which the satellite and the model both hold a value |
+
+Means are float32 in mg m⁻³, NaN where no day holds a value; numbers of days are uint8.
+
+The matched index is there to compare the two products: the satellite sees a position on some days only, so its mean and the plain model mean do not cover the same days. Where `chl_matched_days` equals `chl_satellite_days`, `chl_model_surface_matched` and the satellite means cover exactly the same days.
+
+Global attributes hold the provenance (`code_commit`, `code_version`, `dataset_version`, `trajectory_source`, `history`) and the two products as downloaded (`satellite_source`, `model_source`: product, DOI, dataset and version, from the provenance files of the download scripts).
+
+### Tests
+
+```bash
+cd recruitment/scripts
+sbatch check_inputs_chl.sh                                 # before anything else
+sbatch validate_pass2.sh cohort $KRICO_RUNS/KRICO_0003/1994_01_15.nc data_v3.0_chl_test
+sbatch validate_pass2.sh report ../data_v3.0_chl/1994_01_15.nc
+```
+
+- `check_inputs_chl` runs on every cohort the checks the job itself applies: the trajectory file, the 366 days of the climatology, and the model files of the 201 days of the cohort. It lists every problem.
+- `cohort` writes one file into a test folder and reports on it; `report` does the same on files already written. The report holds:
+  - consistency of the numbers of days and of the means, on every particle;
+  - the two window bounds against the pass 1 file in `data_v3.0_glorys12/`, for every particle;
+  - every index of a sample of particles, computed again by another route (files decoded by xarray, cell by nearest-coordinate selection, plain loops) and required to equal the stored value after rounding. Particles within 5 × 10⁻⁶ degree of a cell edge are left out and counted, because the float32 coordinates of the files do not decide which cell is the nearest;
+  - what the file holds, how the two products compare, and the bytes on disk per variable.
+
+On synthetic files (five cohorts of 88,800 particles, random fields with gaps, land and a sea floor), the stored and recomputed indices agree for every particle compared, and six errors planted in the code (a day, a level, a window bound, the layer depth, the minimum count, the cell) are each detected. The run on the trajectories is still to come.
 
 ## Archiving (project maintainer)
 

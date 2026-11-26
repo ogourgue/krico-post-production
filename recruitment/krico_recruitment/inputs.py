@@ -6,6 +6,10 @@ check_cohort is called by process_cohort.py before anything is computed,
 and by check_inputs.py on every cohort before any job is submitted, so
 that the two can never disagree on what an acceptable input is. Every
 failure raises ValueError (or FileNotFoundError) with the file name.
+
+check_trajectory is the part that concerns the trajectory file alone; pass
+2 (process_cohort_chl.py), which reads no release-cell file, calls it
+directly.
 """
 
 import re
@@ -48,35 +52,14 @@ def check_ice_source(ice_source, ice_dir):
                              f"{nsidc_ice.SOURCES[ice_source]['env']})")
 
 
-def check_cohort(trajectory_path, release_cells_dir, statics=None,
-                 read_positions=True, ice_source="glorys12", ice_dir=None):
+def check_trajectory(trajectory_path, read_positions=True):
     """
-    Check the inputs of one cohort and return what the classification
-    needs from them.
+    Check one trajectory file: name, dimensions, variables, types, and the
+    release time of every particle.
 
-    Parameters
-    ----------
-    trajectory_path : path of YYYY_MM_DD.nc
-    release_cells_dir : folder of glorys12_release_cells_YYYY.nc
-    statics : dict, optional
-        Cache of pre_release.open_static results by path, for a caller that
-        checks many cohorts of the same spawning year.
-    read_positions : bool
-        False skips the checks that read the release positions (headers
-        and release time only).
-    ice_source, ice_dir : str
-        "glorys12" (the sea ice of the trajectory file and of the
-        release-cell file), or a product of nsidc_ice.SOURCES with the
-        folder of its monthly files, which must then hold every day from
-        the spawning day to the last tracked day.
-
-    Returns
-    -------
-    dict with release_day, n_particles, n_obs, static (pre_release
-    .open_static) and, if read_positions, cell (index of the release cell
-    of every particle) and depth (release depths).
+    Returns a dict with release_day, n_particles, n_obs and, if
+    read_positions, the release lon, lat and depth (float64).
     """
-    check_ice_source(ice_source, ice_dir)
     path = Path(trajectory_path)
     name = path.name
     day = cohort_day(path)
@@ -122,11 +105,48 @@ def check_cohort(trajectory_path, release_cells_dir, statics=None,
                              + (" ..." if stamps.size > 3 else "")
                              + f", expected {expected} for every particle")
 
+        result = {"release_day": day, "n_particles": n, "n_obs": n_obs}
         if read_positions:
             first = ds.isel(obs=0)
-            lon = np.asarray(first["lon"].values, dtype=np.float64)
-            lat = np.asarray(first["lat"].values, dtype=np.float64)
-            depth = np.asarray(first["z"].values, dtype=np.float64)
+            for key, var in (("lon", "lon"), ("lat", "lat"), ("depth", "z")):
+                result[key] = np.asarray(first[var].values, dtype=np.float64)
+    return result
+
+
+def check_cohort(trajectory_path, release_cells_dir, statics=None,
+                 read_positions=True, ice_source="glorys12", ice_dir=None):
+    """
+    Check the inputs of one cohort and return what the classification
+    needs from them.
+
+    Parameters
+    ----------
+    trajectory_path : path of YYYY_MM_DD.nc
+    release_cells_dir : folder of glorys12_release_cells_YYYY.nc
+    statics : dict, optional
+        Cache of pre_release.open_static results by path, for a caller that
+        checks many cohorts of the same spawning year.
+    read_positions : bool
+        False skips the checks that read the release positions (headers
+        and release time only).
+    ice_source, ice_dir : str
+        "glorys12" (the sea ice of the trajectory file and of the
+        release-cell file), or a product of nsidc_ice.SOURCES with the
+        folder of its monthly files, which must then hold every day from
+        the spawning day to the last tracked day.
+
+    Returns
+    -------
+    dict with release_day, n_particles, n_obs, static (pre_release
+    .open_static) and, if read_positions, cell (index of the release cell
+    of every particle) and depth (release depths).
+    """
+    check_ice_source(ice_source, ice_dir)
+    trajectory = check_trajectory(trajectory_path, read_positions)
+    name = Path(trajectory_path).name
+    day, n, n_obs = (trajectory[k] for k in ("release_day", "n_particles", "n_obs"))
+    if read_positions:
+        lon, lat, depth = (trajectory[k] for k in ("lon", "lat", "depth"))
 
     # Release-cell file of the spawning year: the 24 days before release
     # (M1, M3) and the release day (day-0 check) must be inside it.
