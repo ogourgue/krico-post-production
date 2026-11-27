@@ -4,7 +4,7 @@ Per-particle recruitment post-processing for the KRICO Lagrangian trajectory dat
 
 Reads one Parcels trajectory NetCDF per release-day cohort and produces a per-particle NetCDF following the Thorpe et al. (2019) framework: the outcome of each particle, one of nine mutually exclusive states, and the diagnostics the outcome is derived from.
 
-> **State of this branch.** The code is that of dataset **v3.0.0**, in production: [pass 0](#release-cell-extraction-glorys12-sea-ice-and-temperature) (inputs at the release cells) and [pass 1](#dataset-v300-pass-1) (the classification) are written and run; [pass 2](#dataset-v300-pass-2-chlorophyll) (chlorophyll) is written and tested on synthetic files, not yet run on the trajectories. The published dataset is still v2.0.0, which the tag `v2.0.1` produces; sections that describe it say so.
+> **State of this branch.** The code is that of dataset **v3.0.0**, in production: [pass 0](#release-cell-extraction-glorys12-sea-ice-and-temperature) (inputs at the release cells) and [pass 1](#dataset-v300-pass-1) (the classification) and [pass 2](#dataset-v300-pass-2-chlorophyll) (chlorophyll) are written and run; [the sets they produced](#dataset-v300-the-runs) are listed below. The published dataset is still v2.0.0, which the tag `v2.0.1` produces; sections that describe it say so.
 
 ## Layout
 
@@ -346,7 +346,41 @@ sbatch validate_pass2.sh report ../data_v3.0_chl/1994_01_15.nc
   - every index of a sample of particles, computed again by another route (files decoded by xarray, cell by nearest-coordinate selection, plain loops) and required to equal the stored value after rounding. Particles within 5 × 10⁻⁶ degree of a cell edge are left out and counted, because the float32 coordinates of the files do not decide which cell is the nearest;
   - what the file holds, how the two products compare, and the bytes on disk per variable.
 
-On synthetic files (five cohorts of 88,800 particles, random fields with gaps, land and a sea floor), the stored and recomputed indices agree for every particle compared, and six errors planted in the code (a day, a level, a window bound, the layer depth, the minimum count, the cell) are each detected. The run on the trajectories is still to come.
+On synthetic files (five cohorts of 88,800 particles, random fields with gaps, land and a sea floor), the stored and recomputed indices agree for every particle compared, and six errors planted in the code (a day, a level, a window bound, the layer depth, the minimum count, the cell) are each detected.
+
+On the trajectories (26 and 27 November 2026):
+
+- **Input check** of every cohort of the 32 spawning years: no problem, no warning.
+- **Five cohorts:** two written by the `cohort` test before the run (releases of 15 November 1993 and 15 January 1994) and three taken from the run (15 January 2019, 29 February 1996, 14 March 2025). In each, no count or mean is inconsistent, the two window bounds equal those of the pass 1 file for all 545,807 particles, and every index of the 312 to 353 particles compared equals its recomputation. Between 28 and 48 particles per cohort were left out for lying on a cell edge.
+- **Cost:** 249 to 263 s per cohort alone and about 290 s with 30 yearly tasks running together; 4.8 GB of memory; about 20 bytes per particle on disk.
+
+## Dataset v3.0.0: the runs
+
+Each set holds one file per cohort, 3,848 files, with no failed cohort.
+
+| Folder | Content | Code | Size | Goes to Zenodo |
+|---|---|---|---|---|
+| `data_v3.0_glorys12/` | Pass 1, GLORYS12 sea ice | `v3.0.0-rc1` (`889ad21`) | 82.9 GB | Yes |
+| `data_v3.0_nsidc/` | Pass 1, NSIDC sea ice (G02202 v6) | `v3.0.0-rc2` (`a819e06`) | 82.9 GB | No |
+| `data_v3.0_glorys12_25km/` | Pass 1, GLORYS12 sea ice on the NSIDC grid | `v3.0.0-rc2` (`a819e06`) | 82.8 GB | No |
+| `data_v3.0_chl/` | Pass 2, chlorophyll | `v3.0.0-rc3` (`f92d8e5`) | 41 GB | Yes |
+
+- **Code identity.** Every file records the commit that produced it (`code_commit`) and the output of `git describe` at that commit (`code_version`). The release candidates are tags placed during production on the commit that passed the tests; the commit is the identity of the code. `rc2` adds the other ice sources and leaves the GLORYS12 output unchanged (checked on a file of the run); `rc3` adds pass 2 and leaves the pass 1 output unchanged (checked on synthetic cohorts).
+- **What is published.** The dataset v3.0.0 on Zenodo is to hold the GLORYS12 set of pass 1 and the pass 2 set. The two other pass 1 sets serve the ice-source test. The pass 0 files (32 files, 68 GB, commit `779f924`) are an intermediate product, like the trajectories and the forcing: their scripts are published, the files are not. The forcing on its native grid is behind a login at Mercator Ocean, so rebuilding the pass 0 files from the sources is not a one-command download.
+
+Outcome shares over the 3,848 cohorts (2,100,265,336 particles), from `outcome_distribution.sh`:
+
+| Outcome | GLORYS12 | GLORYS12 on the NSIDC grid | NSIDC |
+|---|---|---|---|
+| `recruit_on_shelf_slope` | 5.25% | 5.24% | 5.03% |
+| `recruit_off_shelf_slope` | 13.42% | 13.42% | 12.77% |
+| `M1_spawning_under_ice` | 28.35% | 28.28% | 27.00% |
+| `M3_cold_sensitivity` | 0.06% | 0.08% | 0.09% |
+| `M4_calyptopis_starvation` | 6.38% | 6.26% | 7.67% |
+| `M5_overwintering_stage` | 6.24% | 6.38% | 5.74% |
+| `M6_overwintering_habitat` | 38.23% | 38.23% | 40.11% |
+| `censored` | 1.29% | 1.35% | 0.83% |
+| `exited_domain` | 0.76% | 0.77% | 0.77% |
 
 ## Archiving (project maintainer)
 
